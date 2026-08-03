@@ -1,0 +1,46 @@
+name: Release VSIX
+
+# 仅在推送 v*.*.* 标签时触发，自动构建并上传 .vsix 作为 Release asset
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # 需要创建 Release 及上传产物
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: Compile & package
+        run: |
+          yarn compile
+          yarn package
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: investment-monitor v${{ steps.version.outputs.version }}
+          files: investment-monitor-*.vsix
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
