@@ -15,6 +15,13 @@
 
 </div>
 
+> [!IMPORTANT]
+> ## 关于本分支（fork）
+> 本仓库是从上游 **LeekFund（[LeekHub/leek-fund](https://github.com/LeekHub/leek-fund)）** fork 而来的**个人/独立维护分支**，与官方无任何隶属关系。
+> - 本分支的扩展发布名已改为 **`investment-monitor`**，以避免与官方 Marketplace 上的原版扩展混淆。
+> - **原版 LeekFund 已在官方 Visual Studio Marketplace（[giscafer.leek-fund](https://marketplace.visualstudio.com/items?itemName=giscafer.leek-fund)）商业化运营，包含 Pro 付费功能。** 本分支为**非商业、仅自用/学习用途**的衍生版本，**不提供、不修改、不重新分发任何 Pro 付费功能**。
+> - 下方「LeekFund Pro」等章节为**原版功能对照说明**，仅用于展示上游能力，**不代表本分支已包含或可用**。如需完整功能与官方支持，请前往官方渠道并支持原作者。
+> - 如本分支内容涉及对上游项目的任何不当使用，请随时联系下架。
 
 **声明**：本软件仅为数据辅助展示工具，不提供任何投资建议。数据均来自公开网络渠道，因网络延迟或第三方引起的行情误差，本软件不承担法律责任。
 
@@ -113,6 +120,14 @@
   <img src="https://contrib.rocks/image?repo=LeekHub/leek-fund" />
 </a>
 
+
+## 本分支更新记录
+
+> 以下为 `investment-monitor`（本 fork 分支）相对上游的改动记录，与原版官方发布无关。
+
+| 日期 | 版本/分支 | 更新内容 |
+|------|-----------|----------|
+| 2026-08-03 | `dev` | 基金估值数据源由已下线接口迁移至新浪行情接口（GBK 解码 + `Referer`）；快讯服务（金十 / 选股宝）输出与抽象层适配；`leek-center` 前端路由与入口调整；`.gitignore` 补充忽略项；扩展 id 重命名为 `investment-monitor` |
 
 ## License
 
