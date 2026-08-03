@@ -36,6 +36,10 @@ export default class XuanGuBaoFlushService extends NewsFlushServiceAbstractClass
           // has_explain: true,
           platform: 'pcweb',
         },
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          Referer: 'https://xuangubao.cn/',
+        },
       });
       const { data } = res;
       if (data.code === 20000) {
@@ -72,7 +76,9 @@ export default class XuanGuBaoFlushService extends NewsFlushServiceAbstractClass
     // let content = `${msg.title}`;
     let impact = '';
     let bkjStr = '';
-    if (msg.impact !== 0) {
+    // 有利多/利空标记的视为「重要」快讯，普通资讯为「一般」
+    const important = msg.impact !== 0;
+    if (important) {
       impact = msg.impact === 1 ? '【利多 🚀️ 】' : '【利空 🍜️ 】';
     }
 
@@ -88,6 +94,7 @@ export default class XuanGuBaoFlushService extends NewsFlushServiceAbstractClass
         type: 'xgb',
         data: msg,
         time: msg.created_at * 1000,
+        important,
       }
     );
   }

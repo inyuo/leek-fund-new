@@ -91,7 +91,11 @@
         "icon": "$(gear)"
       },
       {
-        "command": "leek-fund.viewFundRank",
+        "command": "investment-monitor.customSetting",
+        "title": "Leek: 个性定制"
+      },
+      {
+        "command": "investment-monitor.viewFundRank",
         "title": "基金排行榜",
         "icon": {
           "light": "resources/light/rank.svg",
@@ -553,21 +557,6 @@
           "command": "leek-fund.setPairTop",
           "when": "view == leekFundView.binance",
           "group": "group1"
-        },
-        {
-          "command": "leek-fund.viewUserTimeline",
-          "when": "view == leekFundView.news",
-          "group": "group0"
-        },
-        {
-          "command": "leek-fund.deleteUser",
-          "when": "view == leekFundView.news",
-          "group": "group1"
-        },
-        {
-          "command": "leek-fund.xuangubaoNews",
-          "when": "view == leekFundView.news",
-          "group": "navigation"
         }
       ]
     },
@@ -752,10 +741,15 @@
         },
         "leek-fund.flash-news": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "开启快讯输出（查看 - 输出 - 韭菜盒子快讯）"
         },
-        "leek-fund.expandAStock": {
+        "investment-monitor.flash-news-important-only": {
+          "type": "boolean",
+          "default": false,
+          "description": "仅显示「重要」快讯（过滤一般消息，重要消息以 🔴 标记）"
+        },
+        "investment-monitor.expandAStock": {
           "type": "boolean",
           "default": true,
           "description": "默认展开A股"

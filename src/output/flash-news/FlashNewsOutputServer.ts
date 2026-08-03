@@ -50,13 +50,38 @@ export default class FlashNewsOutputServer implements FlashNewsServerInterface {
     this.flashNewsBarItem?.dispose();
   }
 
-  print(news: string) {
+  // 将快讯正文拆分为行，超过 3 行时截断并在第 3 行末加省略号
+  private formatNewsLines(news: string): string[] {
+    const lines = news
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+$/, ''))
+      .filter((l) => l.length > 0);
+    if (lines.length <= 3) {
+      return lines;
+    }
+    const head = lines.slice(0, 3);
+    head[2] = `${head[2]} …`;
+    return head;
+  }
+
+  print(news: string, source?: { type: string; data: any; time: number; important?: boolean }) {
     if (!this.isEnableOutput) return;
+    // 仅显示重要快讯：来源未标记重要时直接过滤
+    const importantOnly = LeekFundConfig.getConfig('investment-monitor.flash-news-important-only');
+    if (importantOnly && !source?.important) {
+      return;
+    }
+    const tag = source?.important ? '🔴 重要' : '⚪ 一般';
+    const taggedNews = `[${tag}] ${news}`;
     this.newsCount++;
-    this.newsCache.push(news);
+    this.newsCache.push(taggedNews);
     this.newsCache = this.newsCache.slice(-5);
     this.updateNewsBarItem();
-    this.op?.appendLine(`${news}\r\n-----------------------------`);
+    // 多行内容逐行输出，正文最多 3 行；消息之间增加空行间隔
+    this.formatNewsLines(taggedNews).forEach((line) => this.op?.appendLine(line));
+    this.op?.appendLine('');
+    this.op?.appendLine('-----------------------------');
+    this.op?.appendLine('');
   }
 
   updateNewsBarItem() {

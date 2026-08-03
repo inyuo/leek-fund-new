@@ -96,6 +96,8 @@ export default class Jin10FlushService extends NewsFlushServiceAbstractClass {
       // if (!important) return; // 去掉判断显示更多的内容
 
       const contentSuffix = `（https://flash.jin10.com/detail/${id}）\r\n[金十快讯 - ${time}]`;
+      // 金十协议 important 字段：1/true 表示重要快讯
+      const important = data.important === 1 || data.important === true;
 
       if (type === 0) {
         const content = this.formatContent(data.data.content);
@@ -104,6 +106,7 @@ export default class Jin10FlushService extends NewsFlushServiceAbstractClass {
             type: 'jin10',
             data,
             time: new Date(data.time).getTime(),
+            important,
           });
       }
       if (type === 1) {
@@ -112,6 +115,7 @@ export default class Jin10FlushService extends NewsFlushServiceAbstractClass {
           type: 'jin10',
           data,
           time: new Date(data.time).getTime(),
+          important,
         });
       }
     }

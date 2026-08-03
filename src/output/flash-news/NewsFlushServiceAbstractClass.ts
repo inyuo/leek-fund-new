@@ -3,11 +3,18 @@ import FlashNewsDaemon from './FlashNewsDaemon';
 /**
  * 获取新闻刷新服务的抽象类
  */
+export interface FlashNewsSource {
+  type: string;
+  data: any;
+  time: number;
+  important?: boolean;
+}
+
 export default abstract class NewsFlushServiceAbstractClass {
   constructor(readonly daemon: FlashNewsDaemon) {}
   abstract destroy(): void;
   pause() {}
-  print(content: string, source: { type: string; data: any; time: number }) {
+  print(content: string, source: FlashNewsSource) {
     this.daemon.print(`${content}`, source);
   }
 }
@@ -16,6 +23,6 @@ export default abstract class NewsFlushServiceAbstractClass {
  * 具体服务的接口方法
  */
 export interface FlashNewsServerInterface {
-  print: (content: string, source?: any) => void;
+  print: (content: string, source?: FlashNewsSource) => void;
   destroy: () => void;
 }

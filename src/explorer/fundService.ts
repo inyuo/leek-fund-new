@@ -1,4 +1,5 @@
 import Axios from 'axios';
+import * as iconv from 'iconv-lite';
 import { ExtensionContext } from 'vscode';
 import globalState from '../globalState';
 import { LeekTreeItem } from '../shared/leekTreeItem';
@@ -77,16 +78,27 @@ export default class FundService extends LeekService {
       const fundInfos = [];
       for (const resultFundInfo of resultFundInfos) {
         if (resultFundInfo.status === 'fulfilled') {
-          const fundStrings = /jsonpgz\((.*)\);/.exec(resultFundInfo.value) || [];
-          const fundString = fundStrings.length === 2 ? fundStrings[1] : '';
-          // 不支持海外鸡了
-          // https://github.com/LeekHub/leek-fund/pull/390
+          const parts = (resultFundInfo.value || '').split('#');
+          const fundCode = parts[0];
+          const fundString = parts[1];
           if (fundString) {
-            const fundInfo = JSON.parse(fundString);
-            fundInfos.push(fundInfo);
+            try {
+              const fundInfo = JSON.parse(fundString);
+              fundInfos.push(fundInfo);
+            } catch (e) {
+              // 解析失败，构造空数据用于展示
+              fundInfos.push({
+                fundcode: fundCode,
+                name: `${fundCode}暂无数据`,
+                gszzl: '--',
+                dwjz: '--',
+                jzrq: '',
+                gsz: '--',
+                gztime: '',
+              });
+            }
           } else {
-            // 不支持的基金，构造一个空数据用于展示，防止用户疑惑添加基金后不展示
-            const fundCode = resultFundInfo.value.split('#')[0];
+            // 不支持的基金或接口无数据，构造空数据用于展示
             fundInfos.push({
               fundcode: fundCode,
               name: `${fundCode}暂无数据`,
@@ -111,8 +123,9 @@ export default class FundService extends LeekService {
           dwjz: NAV,
           jzrq: PDATE,
         } = item;
-        const time = GZTIME?.substr(0, 10);
-        const isUpdated = PDATE?.substr(0, 10) === time; // 判断闭市的时候
+        // 新浪 fu_ 接口 gztime 仅含时分秒，无法与净值日期做日期比对，
+        // 改用中国时区交易时段判定市场是否闭市（闭市后展示结算盈亏）
+        const isUpdated = !FundService.isMarketOpen();
         let earnings = 0;
         let amount = 0;
         let unitPrice = 0;
@@ -186,19 +199,122 @@ export default class FundService extends LeekService {
     }
   }
 
+  // 当前是否为 A 股交易时段（中国时区，周一至周五 9:30-11:30、13:00-15:00）
+  static isMarketOpen(): boolean {
+    const now = new Date();
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    const cn = new Date(utcMs + 8 * 3600000);
+    const day = cn.getDay();
+    if (day === 0 || day === 6) {
+      return false;
+    }
+    const minutes = cn.getHours() * 60 + cn.getMinutes();
+    const morning = 9 * 60 + 30 <= minutes && minutes <= 11 * 60 + 30;
+    const afternoon = 13 * 60 <= minutes && minutes <= 15 * 60;
+    return morning || afternoon;
+  }
+
+  // 中国时区日期时间字符串 YYYY-MM-DD HH:mm:ss
+  static chinaDateString(d: Date = new Date()): string {
+    const utcMs = d.getTime() + d.getTimezoneOffset() * 60000;
+    const cn = new Date(utcMs + 8 * 3600000);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${cn.getFullYear()}-${p(cn.getMonth() + 1)}-${p(cn.getDate())} ${p(
+      cn.getHours()
+    )}:${p(cn.getMinutes())}:${p(cn.getSeconds())}`;
+  }
+
+  // 将新浪 fu_ 接口返回映射为统一基金对象
+  static mapFuData(fundCode: string, raw: string): string {
+    const f = raw.split(',');
+    const jzrq = f[7] || FundService.chinaDateString().substr(0, 10);
+    const obj = {
+      name: f[0],
+      fundcode: fundCode,
+      gsz: f[2] || '--',
+      gszzl: f[6] || '--',
+      gztime: `${jzrq} ${f[1]}`, // 补全日期，便于展示与排序
+      dwjz: f[3] || '--',
+      jzrq,
+    };
+    return JSON.stringify(obj);
+  }
+
+  // 将新浪股票行情接口返回映射为统一基金对象（用于场内货基/ETF 兜底）
+  static mapStockData(fundCode: string, raw: string): string {
+    const f = raw.split(',');
+    const jzrq = FundService.chinaDateString().substr(0, 10);
+    const price = f[1];
+    const yest = f[2];
+    const gszzl =
+      yest && Number(yest)
+        ? (((Number(price) - Number(yest)) / Number(yest)) * 100).toFixed(2)
+        : '--';
+    const obj = {
+      name: f[0],
+      fundcode: fundCode,
+      gsz: price || '--',
+      gszzl,
+      gztime: FundService.chinaDateString(),
+      dwjz: yest || '--',
+      jzrq,
+    };
+    return JSON.stringify(obj);
+  }
+
+  // fu_ 无数据时回退到新浪股票行情（sh/sz），兼容场内货基ETF等
+  static qryStockQuote(fundCode: string): Promise<string> {
+    const fetch = (prefix: string) =>
+      Axios.get(`https://hq.sinajs.cn/list=${prefix}${fundCode}`, {
+        headers: { ...randHeader(), Referer: 'https://finance.sina.com.cn' },
+        responseType: 'arraybuffer',
+      }).then((resp: any) => {
+        const text = iconv.decode(Buffer.from(resp.data), 'gbk');
+        const m = new RegExp(`hq_str_${prefix}${fundCode}="(.*)";`).exec(text);
+        if (!m || !m[1] || !m[1].split(',')[1]) {
+          throw new Error('empty');
+        }
+        return FundService.mapStockData(fundCode, m[1]);
+      });
+    return new Promise((resolve) => {
+      fetch('sh')
+        .then((data) => resolve(`${fundCode}#${data}`))
+        .catch(() =>
+          fetch('sz')
+            .then((data) => resolve(`${fundCode}#${data}`))
+            .catch(() => resolve(`${fundCode}#`))
+        );
+    });
+  }
+
   static qryFundInfo(fundCode: string): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!fundCode) {
         reject('');
       } else {
-        const url = `https://fundgz.1234567.com.cn/js/${fundCode}.js?rt=1589463125600`;
+        // 天天基金估值接口(fundgz.1234567.com.cn)已下线，改用新浪基金实时估值接口
+        const url = `https://hq.sinajs.cn/list=fu_${fundCode}`;
         Axios.get(url, {
-          headers: randHeader(),
+          headers: {
+            ...randHeader(),
+            Referer: 'https://finance.sina.com.cn',
+          },
+          responseType: 'arraybuffer',
         })
-          .then((resp) => {
-            resolve(`${fundCode}#${resp.data}`);
+          .then((resp: any) => {
+            const buf = Buffer.from(resp.data);
+            const text = iconv.decode(buf, 'gbk');
+            const m = new RegExp(`hq_str_fu_${fundCode}="(.*)";`).exec(text);
+            if (!m || !m[1]) {
+              // 货币基金/部分场内品种 fu_ 无数据，回退股票行情接口
+              FundService.qryStockQuote(fundCode)
+                .then(resolve)
+                .catch(() => resolve(`${fundCode}#`));
+              return;
+            }
+            resolve(`${fundCode}#${FundService.mapFuData(fundCode, m[1])}`);
           })
-          .catch((err) => {
+          .catch((err: any) => {
             console.error(err);
             reject('');
           });

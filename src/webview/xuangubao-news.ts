@@ -335,6 +335,10 @@ export class XuanGuBaoNewsView {
         subj_ids: subjectIds.join(','),
         platform: 'pcweb',
       },
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Referer: 'https://xuangubao.cn/',
+      },
     });
 
     // 获取当天所有消息用于全量显示
@@ -348,6 +352,10 @@ export class XuanGuBaoNewsView {
         subj_ids: subjectIds.join(','),
         start_time: todayStartTimestamp,
         platform: 'pcweb',
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Referer: 'https://xuangubao.cn/',
       },
     });
 

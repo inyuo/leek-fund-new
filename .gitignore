@@ -1,13 +1,15 @@
 out
 node_modules
+template-packages/*/node_modules
 .vscode-test/
 *.vsix
 *.zip
-# yarn.lock
 package-lock.json
 demo/donate.html
 demo/api.html
 yarn-error.log
+*.log
+*.tsbuildinfo
 .DS_Store
 
 template/leek-center/build
@@ -15,3 +17,4 @@ template-packages/leek-center/.eslintcache
 !template-packages/leek-center/yarn.lock
 
 .idea
+.codebuddy/
