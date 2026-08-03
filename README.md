@@ -6,10 +6,21 @@
 |------|-----------|----------|
 | 2026-08-03 | `dev` | 基金估值数据源由已下线接口迁移至新浪行情接口（GBK 解码 + `Referer`）；快讯服务（金十 / 选股宝）输出与抽象层适配；`leek-center` 前端路由与入口调整；`.gitignore` 补充忽略项；扩展 id 重命名为 `investment-monitor` |
 
+<br />
+
+> [!NOTE]
+> **以下为上游原版 LeekFund 的说明内容**，仅供对照参考，不代表本分支（investment-monitor）已包含或提供相关功能。原版已商业化运营，请支持原作者。
+
+<br />
+
 ---
 
 <div align="center">
 <img src="./screenshot/leek-logo.png" alt="韭菜盒子" width="256"/>
+
+
+
+
 
 # LeekFund
 
