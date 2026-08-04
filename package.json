@@ -1,14 +1,15 @@
 {
-  "name": "leek-fund",
-  "displayName": "韭菜盒子",
-  "description": "韭菜盒子，VSCode 里也可以看股票 & 基金实时数据，做最好用的投资插件",
-  "version": "3.24.0",
+  "name": "investment-monitor",
+  "displayName": "韭菜盒子 (Fork)",
+  "description": "韭菜盒子 fork 衍生版，VSCode 里也可以看股票 & 基金实时数据",
+  "version": "1.0.0",
   "author": "Nicky Lao <giscafer@outlook.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LeekHub/leek-fund"
+    "url": "https://github.com/inyuo/leek-fund-new"
   },
-  "license": "BSD-3-Clause",
+  "publisher": "inyuo-fork",
+"license": "BSD-3-Clause",
   "keywords": [
     "stock",
     "fund",
@@ -20,7 +21,6 @@
     "东方财富",
     "天天基金"
   ],
-  "publisher": "giscafer",
   "icon": "resources/logo.png",
   "engines": {
     "vscode": "^1.59.0"
