@@ -31,7 +31,7 @@ export default function StockInfoHeader({
         <Space style={{ marginLeft: 20 }}>
           <Button
             onClick={() => {
-              postMessage('executeCommand', 'leek-fund.setFundAmount');
+              postMessage('executeCommand', 'leek-fund-old.setFundAmount');
             }}
             size="small"
           >

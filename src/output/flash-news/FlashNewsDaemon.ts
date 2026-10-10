@@ -1,10 +1,7 @@
 import Jin10FlushService from './impl/Jin10FlushService';
-import XuanGuBaoFlushService from './impl/XuanGuBaoFLushServices';
 import NewsFlushServiceAbstractClass, {
   FlashNewsServerInterface,
 } from './NewsFlushServiceAbstractClass';
-
-
 
 let instance: FlashNewsDaemon | undefined;
 
@@ -49,9 +46,9 @@ export default class FlashNewsDaemon {
   }
 
   initServices() {
-    // 暂时不要金十快讯，金十更适合期货。
+    // 资讯源已切换为韭研公社个股新闻（按股票维度，无全市场流），
+    // 因此快讯推送链路仅保留金十。
     this.flushServices.add(new Jin10FlushService(this));
-    this.flushServices.add(new XuanGuBaoFlushService(this));
     this.isDestroy = false;
   }
 

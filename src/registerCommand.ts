@@ -326,9 +326,9 @@ export function registerViewEvent(
   // AI分析股票
   context.subscriptions.push(
     commands.registerCommand('leek-fund.aiStockAnalysis', async (target) => {
-      const { XuanGuBaoNewsView } = require('./webview/xuangubao-news');
-      const xuanGuBaoNewsView = XuanGuBaoNewsView.getInstance();
-      const result = await xuanGuBaoNewsView.send_ai_stock_analysis(target);
+      const { StockNewsView } = require('./webview/stock-news-view');
+      const stockNewsView = StockNewsView.getInstance();
+      const result = await stockNewsView.send_ai_stock_analysis(target);
       if (result !== '') {
         // 控制台输出 - 限制长度避免控制台截断
         // const consoleResult = result.length > 2000 ? result.substring(0, 2000) + '...（内容过长，完整结果请查看OUTPUT面板或Webview）' : result;
@@ -959,11 +959,11 @@ export function registerViewEvent(
   );
 
 
-  // 选股宝快讯命令
+  // 个股新闻命令（数据源：韭研公社个股新闻）
   context.subscriptions.push(
-    commands.registerCommand('leek-fund.xuangubaoNews', () => {
-      const { XuanGuBaoNewsView } = require('./webview/xuangubao-news');
-      XuanGuBaoNewsView.getInstance().show();
+    commands.registerCommand('leek-fund.stockNews', (stock?: string) => {
+      const { StockNewsView } = require('./webview/stock-news-view');
+      StockNewsView.getInstance().show(stock);
     })
   );
   // 设置个股 AI 分析历史长度（A 股 / 港股均生效）

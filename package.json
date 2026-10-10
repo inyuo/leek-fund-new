@@ -9,7 +9,7 @@
     "url": "https://github.com/inyuo/leek-fund-new"
   },
   "publisher": "inyuo-fork",
-"license": "BSD-3-Clause",
+  "license": "BSD-3-Clause",
   "keywords": [
     "stock",
     "fund",
@@ -232,7 +232,7 @@
       },
       {
         "command": "leek-fund.aiStockAnalysis",
-        "title": "AI分析股票（A股搜狐/港股腾讯 前复权日线，含快讯与韭研）",
+        "title": "AI分析股票（A股搜狐/港股腾讯 前复权日线，含韭研公社个股新闻）",
         "icon": "$(lightbulb)"
       },
       {
@@ -329,8 +329,8 @@
         }
       },
       {
-        "command": "leek-fund.xuangubaoNews",
-        "title": "选股宝快讯",
+        "command": "leek-fund.stockNews",
+        "title": "个股新闻（韭研公社）",
         "icon": {
           "light": "resources/light/news.svg",
           "dark": "resources/dark/news.svg"
@@ -747,7 +747,7 @@
         "investment-monitor.flash-news-important-only": {
           "type": "boolean",
           "default": false,
-          "description": "仅显示「重要」快讯（过滤一般消息，重要消息以 🔴 标记）"
+          "description": "仅显示「重要」快讯（过滤一般消息，重要消息以 🔴 标记）。当前快讯源为金十数据"
         },
         "investment-monitor.expandAStock": {
           "type": "boolean",
@@ -806,8 +806,8 @@
     },
     "viewsWelcome": [
       {
-        "view": "选股宝快讯、AI助手",
-        "contents": "\n [📰 选股宝快讯、AI助手](command:leek-fund.xuangubaoNews)"
+        "view": "leekFundView.stock",
+        "contents": "\n [📰 个股新闻（韭研公社）](command:leek-fund.stockNews)"
       },
       {
         "view": "leekFundView.fund",

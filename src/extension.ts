@@ -64,7 +64,7 @@ export async function activate(context: ExtensionContext) {
 
   flashNewsOutputServer = new FlashNewsOutputServer();
 
-  // 初始化选股宝快讯服务
+  // 初始化快讯服务（当前仅金十）
   FlashNewsDaemon.registerServer({
     print: () => {},
     destroy: () => {}

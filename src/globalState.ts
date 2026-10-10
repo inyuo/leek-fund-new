@@ -44,19 +44,6 @@ let stockPriceCacheDate = '2020-10-30';
 
 let forexList: Array<ForexData> = []; // 外汇信息
 
-// 选股宝快讯数据
-let xuanGuBaoNews: {
-  messages: Array<any>;
-  next_cursor: string;
-  lastUpdate: number;
-  allDayMessages: Array<any>; // 全量当天新闻
-} = {
-  messages: [],
-  next_cursor: '',
-  lastUpdate: 0,
-  allDayMessages: []
-};
-
 export default {
   context,
   telemetry,
@@ -93,6 +80,4 @@ export default {
   stockHeldTipShow,
 
   forexList,
-
-  xuanGuBaoNews
 };

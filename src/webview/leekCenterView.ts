@@ -9,7 +9,7 @@ import { LeekFundConfig } from '../shared/leekConfig';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { events, formatHTMLWebviewResourcesUrl, getTemplateFileContent } from '../shared/utils';
 import { AiService } from './leek-center/ai-service';
-import { FlashNewsService } from './leek-center/flash-news-service';
+import { StockNewsService } from './leek-center/stock-news-service';
 import LeekCenterFlashNewsView from './leek-center/flash-news-view';
 import ReusedWebviewPanel from './ReusedWebviewPanel';
 import { getEastMoneyHost, getEastmoneyPort } from './proxyService/proxyConfig';
@@ -35,8 +35,8 @@ function leekCenterView(stockService: StockService, fundServices: FundService) {
   setStocksRemind(panel.webview, panelEvents);
   // setDiscussions(panel.webview, panelEvents);
 
-  const flashNewsService = new FlashNewsService(panel.webview);
-  const aiService = new AiService(panel.webview, flashNewsService);
+  const stockNewsService = new StockNewsService(panel.webview);
+  const aiService = new AiService(panel.webview, stockNewsService);
 
   panel.webview.onDidReceiveMessage(async (message) => {
     panelEvents.emit('onDidReceiveMessage', message);
@@ -74,7 +74,8 @@ function leekCenterView(stockService: StockService, fundServices: FundService) {
 
       case 'getNewsData':
       case 'refreshNews':
-        flashNewsService.getNewsData();
+        // 资讯源为韭研公社个股新闻，必须指定股票（名称或代码）
+        stockNewsService.getNewsData(message.data?.stock);
         return;
 
       case 'getAiConfig':

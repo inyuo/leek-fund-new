@@ -1,13 +1,13 @@
 import { Webview, workspace, window } from 'vscode';
 import OpenAI from 'openai';
 import { fetchJYGNewsByCode } from '../jiuyangongshe-news';
-import { FlashNewsService } from './flash-news-service';
+import { StockNewsService } from './stock-news-service';
 import { fetchRecentQfqTradeDataForAi } from '../../shared/aiStockHistoryData';
 
 export class AiService {
   private aiStockAnalysisInProgress = false;
 
-  constructor(private webview: Webview, private flashNewsService: FlashNewsService) {}
+  constructor(private webview: Webview, private stockNewsService: StockNewsService) {}
 
   async handleMessage(message: any) {
     switch (message.command) {
@@ -141,8 +141,8 @@ export class AiService {
     const label = rangeLabel[range] || '近3个月';
 
     window.showWarningMessage(`开始分析：${target.info.name} 股票 ${label}的前复权日线数据，股票代码：${target.info.code}`);
-    const baseMessage = `请根据历史数据和今日热点快讯分析以下股票：${target.info.name}，股票代码：${target.info.code}`;
-    
+    const baseMessage = `请根据历史数据和韭研公社个股新闻分析以下股票：${target.info.name}，股票代码：${target.info.code}`;
+
     // 获取历史复权数据并拼接
     let tradeDataAppendix = '';
     let newsAppendix = '';
@@ -151,31 +151,34 @@ export class AiService {
       if (tradeCsv) {
         tradeDataAppendix = `\n\n以下为${label}的前复权日线数据（来自${sourceLabel}）：\n${tradeCsv}`;
       }
-      const todayNews = await this.fetchTodayAllNewsText();
-      if (todayNews) {
-        newsAppendix = `\n\n以下为今日全部快讯（来自选股宝）：\n${todayNews}`;
-      }
-      // 拼接韭研公社相关文章（按股票代码关键词）
-      try {
-        const stockName = (target?.info?.name || '').toString();
-        if (stockName) {
-          const jygItems = await fetchJYGNewsByCode(stockName, 10, 0);
+
+      // 拼接韭研公社该股的新闻（资讯唯一来源）
+      const stockName = (target?.info?.name || '').toString();
+      const stockCode = (target?.info?.code || '').toString();
+      const keyword = stockName || stockCode;
+      if (keyword) {
+        try {
+          const jygItems = await fetchJYGNewsByCode(keyword, 10, 0);
           if (Array.isArray(jygItems) && jygItems.length) {
             const lines: string[] = [];
             for (const item of jygItems) {
               const title = item.title || '';
               const warns = item.warn_words ? `warn_words: ${item.warn_words}` : '';
-              const snippet = item.content ? (item.content.length > 300 ? item.content.slice(0, 300) + '…' : item.content) : '';
+              const snippet = item.content
+                ? item.content.length > 300
+                  ? item.content.slice(0, 300) + '…'
+                  : item.content
+                : '';
               const ts = item.create_time ? `[${item.create_time}] ` : '';
               lines.push(`- ${ts}${title}`);
               if (warns) lines.push(`  - ${warns}`);
               if (snippet) lines.push(`  - content: ${snippet}`);
             }
-            newsAppendix += `\n\n以下为韭研公社相关文章（关键词：${stockName}）：\n${lines.join('\n')}`;
+            newsAppendix = `\n\n以下为韭研公社该股新闻（关键词：${keyword}）：\n${lines.join('\n')}`;
           }
+        } catch (e) {
+          console.error('拼接韭研公社新闻失败:', e);
         }
-      } catch (e) {
-        console.error('拼接韭研公社新闻失败:', e);
       }
     } catch (e) {
       console.error('获取近三个月交易数据失败:', e);
@@ -210,26 +213,4 @@ export class AiService {
       this.aiStockAnalysisInProgress = false;
     }
   }
-
-  // --- Helpers ---
-
-  private async fetchTodayAllNewsText(): Promise<string> {
-    try {
-      const data = await this.flashNewsService.fetchNewsData();
-      const items = data.allDayMessages || [];
-      if (!items.length) return '';
-      const lines: string[] = [];
-      for (const n of items) {
-        const ts = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN') : '';
-        const title = n.title || '';
-        const summary = n.summary || '';
-        lines.push(`- [${ts}] ${title} ${summary ? ' - ' + summary : ''}`);
-      }
-      return lines.join('\n');
-    } catch (e) {
-      console.error('fetchTodayAllNewsText error:', e);
-      return '';
-    }
-  }
-
 }

@@ -18,7 +18,7 @@ import economyPage from './economy';
 import bkzjPage from './dashboard/bk';
 import OtherPage from './other';
 import AIConfigPage from './ai-config';
-import XuangubaoNewsPage from './xuangubao-news';
+import StockNewsPage from './stock-news';
 import StockWindVanePage from './stock-wind-vane';
 
 const { Content, Sider } = Layout;
@@ -74,8 +74,8 @@ export default function DataCenter({ children }: { children: ReactElement }) {
               height: 'calc(100vh - 86px)',
             }}
           >
-            <Menu.Item key="xuangubao-news">
-              <Link to="/data-center/xuangubao-news">选股宝快讯</Link>
+            <Menu.Item key="stock-news">
+              <Link to="/data-center/stock-news">韭研公社个股新闻</Link>
             </Menu.Item>
             <Menu.Item key="stock-wind-vane">
               <Link to="/data-center/stock-wind-vane">选股风向标</Link>
@@ -167,7 +167,7 @@ export default function DataCenter({ children }: { children: ReactElement }) {
             <Route exact path="/data-center/peigu" component={peiguPage} />
             <Route exact path="/data-center/report" component={reportPage} />
             <Route exact path="/data-center/economy" component={economyPage} />
-            <Route exact path="/data-center/xuangubao-news" component={XuangubaoNewsPage} />
+            <Route exact path="/data-center/stock-news" component={StockNewsPage} />
             <Route exact path="/data-center/stock-wind-vane" component={StockWindVanePage} />
             <Route exact path="/data-center/ai-config" component={AIConfigPage} />
             <Route exact path="/data-center/other" component={OtherPage} />

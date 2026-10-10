@@ -3,13 +3,11 @@ import { Timeline } from 'antd';
 import { useObserver } from 'mobx-react';
 import store from '@/stores/index';
 import dayjs from 'dayjs';
-import XuanGuBaoNewsItem from './xuangubao-news-item';
 import Jin10NewsItem from './jin10-news-item';
 
 import './index.less';
 
 const NewsTypeMapComponents = {
-  xgb: XuanGuBaoNewsItem,
   jin10: Jin10NewsItem,
 };
 

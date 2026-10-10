@@ -55,7 +55,7 @@ Leek box - Monitor the real-time data of stock & fund & future in VSCode, Be the
 - 股票支持分组展示（A 股、港股、美股）
 - 股票涨跌提醒设置
 - 状态栏、侧栏支持自定义模板格式
-- OUTPUT 面板支持选股宝异动快讯，金十资讯
+- OUTPUT 面板支持金十资讯
 - 数据中心>牛熊风向标数据统计
 - 新增支持期货
 - 外汇牌价
