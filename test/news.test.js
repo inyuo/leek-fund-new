@@ -3,6 +3,17 @@
  * 数据来自 /article/community 接口（全市场文章，时间倒序），转换为树节点数据。
  */
 const assert = require('assert');
+const path = require('path');
+const Module = require('module');
+
+// newsService / NewsTreeItem 依赖 vscode 的 TreeItem，测试环境注入最小 mock
+const vscodeMockPath = path.join(__dirname, 'helpers', 'vscode-mock.js');
+const origResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, ...args) {
+  if (request === 'vscode') return vscodeMockPath;
+  return origResolveFilename.call(this, request, ...args);
+};
+
 const { buildJYGNewsItems } = require('../out/explorer/jygNews');
 
 /** 构造一条社区接口返回的原始文章 */
@@ -100,5 +111,52 @@ describe('资讯树节点转换 buildJYGNewsItems', () => {
     const list = Array.from({ length: 5 }, (_, i) => makeArticle(String(i), `消息${i}`));
     assert.strictEqual(buildJYGNewsItems(list, 3).length, 3);
     assert.strictEqual(buildJYGNewsItems(list, 100).length, 5);
+  });
+});
+
+describe('资讯刷新（缓存与强制刷新）', () => {
+  const { NewsService } = require('../out/explorer/newsService');
+  const newsModule = require('../out/webview/jiuyangongshe-news');
+  const originalFetch = newsModule.fetchJYGCommunityNews;
+
+  /** 可控的接口 mock：每次调用返回一批文章并计数 */
+  function mockFetch(counter) {
+    newsModule.fetchJYGCommunityNews = async (limit) => {
+      counter.calls += 1;
+      return [makeArticle(`id-${counter.calls}`, `第${counter.calls}批消息`)];
+    };
+  }
+
+  afterEach(() => {
+    newsModule.fetchJYGCommunityNews = originalFetch;
+  });
+
+  it('缓存期内重复读取只请求一次接口', async () => {
+    const counter = { calls: 0 };
+    mockFetch(counter);
+    const service = new NewsService();
+
+    await service.getNewsList();
+    await service.getNewsList();
+    assert.strictEqual(counter.calls, 1, `缓存期内应只请求 1 次，实际 ${counter.calls} 次`);
+  });
+
+  it('手动刷新必须绕过缓存，重新拉取并返回新内容', async () => {
+    const counter = { calls: 0 };
+    mockFetch(counter);
+    const service = new NewsService();
+
+    const first = await service.getNewsList();
+    assert.strictEqual(first[0].news.title, '第1批消息');
+
+    // 用户点击「刷新资讯」：必须重新请求，而不是返回 30s 内的旧缓存
+    const refreshed = await service.forceRefresh();
+    assert.strictEqual(counter.calls, 2, `点刷新后应重新请求接口，实际仍为 ${counter.calls} 次`);
+    assert.strictEqual(refreshed[0].news.title, '第2批消息', '刷新后应拿到新一批内容');
+
+    // 刷新后的结果也应成为新缓存
+    const cached = await service.getNewsList();
+    assert.strictEqual(cached[0].news.title, '第2批消息');
+    assert.strictEqual(counter.calls, 2, '刷新结果应被缓存，不应再次请求');
   });
 });

@@ -193,10 +193,10 @@ export async function activate(context: ExtensionContext) {
 
   setIntervalTime();
 
-  /* 资讯（韭研社区流）7x24，不受休市影响，可见时每 30 秒刷新 */
+  /* 资讯（韭研社区流）7x24，不受休市影响，可见时每 30 秒强制刷新 */
   newsRefreshTimer = setInterval(() => {
     if (newsTreeView?.visible) {
-      newsProvider.refresh();
+      newsProvider.refresh(true);
     }
   }, 30000);
 

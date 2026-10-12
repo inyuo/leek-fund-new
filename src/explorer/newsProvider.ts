@@ -12,7 +12,13 @@ export class NewsProvider implements TreeDataProvider<NewsTreeItem> {
     this.service = new NewsService();
   }
 
-  refresh(): any {
+  /**
+   * @param force true 时先丢弃缓存重新拉取（手动刷新），false 仅重绘（后台轮询）
+   */
+  async refresh(force = false): Promise<void> {
+    if (force) {
+      await this.service.forceRefresh();
+    }
     this._onDidChangeTreeData.fire(undefined);
   }
 

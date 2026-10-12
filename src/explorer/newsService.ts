@@ -60,6 +60,18 @@ export class NewsService {
     return this.inflight;
   }
 
+  /**
+   * 强制刷新：丢弃缓存重新拉取。
+   * 供「刷新资讯」命令使用 —— 树的 onDidChangeTreeData 只触发重绘，
+   * 重绘时仍会命中 TTL 缓存，因此必须有独立的清缓存出口。
+   */
+  async forceRefresh(): Promise<NewsTreeItem[]> {
+    this.cache = [];
+    this.cacheTime = 0;
+    this.inflight = null;
+    return this.getNewsList();
+  }
+
   private async fetchList(limit: number): Promise<NewsTreeItem[]> {
     try {
       const rawList = await fetchJYGCommunityNews(limit);

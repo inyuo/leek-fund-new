@@ -76,8 +76,9 @@ export function registerViewEvent(
   );
 
   context.subscriptions.push(
-    commands.registerCommand('leek-fund.refreshFollow', () => {
-      newsProvider.refresh();
+    commands.registerCommand('leek-fund.refreshFollow', async () => {
+      // force：清缓存重新拉取，否则重绘时会命中 TTL 缓存导致"刷新不变"
+      await newsProvider.refresh(true);
       window.showInformationMessage(`刷新成功`);
     })
   );
