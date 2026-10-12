@@ -17,4 +17,14 @@ document.md
 development.md
 CODE_OF_CONDUCT.md
 CNAME
+# 以下为打包泄漏项（本地笔记 / CI 配置 / 开发期文件）
+.codebuddy/**
+.github/**
+ai.md
+yarn.lock
+package-lock.json
+commitlint.config.js
+PLAN.md
+test/**
+scripts/**
 # node_modules

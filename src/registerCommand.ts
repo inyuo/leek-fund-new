@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, window, Uri, workspace } from 'vscode';
+import { commands, env, ExtensionContext, window, Uri, workspace } from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import { showAiAnalysisPanel } from './utils/aiAnalysisPanel';
@@ -26,7 +26,6 @@ import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
 import { NewsProvider } from './explorer/newsProvider';
-import { NewsService } from './explorer/newsService';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
 import globalState from './globalState';
@@ -43,7 +42,6 @@ import fundPosition from './webview/fundPosition';
 import fundRank from './webview/fundRank';
 import fundTrend from './webview/fundTrend';
 import leekCenterView from './webview/leekCenterView';
-import openNews from './webview/news';
 import setAmount from './webview/setAmount';
 import setStockPrice from './webview/setStockPrice';
 
@@ -66,7 +64,6 @@ export function registerViewEvent(
   binanceProvider: BinanceProvider,
   forexProvider: ForexProvider
 ) {
-  const newsService = new NewsService();
   const binanceService = new BinanceService(context);
 
   context.subscriptions.push(
@@ -377,73 +374,12 @@ export function registerViewEvent(
   /**
    * News command
    */
+  // 资讯条目：在浏览器打开金十原文
   context.subscriptions.push(
-    commands.registerCommand('leek-fund.newItemClick', (userName, userId) => {
-      openNews(newsService, userId, userName);
-    })
-  );
-  context.subscriptions.push(
-    commands.registerCommand('leek-fund.viewUserTimeline', (target) => {
-      const userName = target.label;
-      const userId = target.id;
-      openNews(newsService, userId, userName, true);
-    })
-  );
-
-  context.subscriptions.push(
-    commands.registerCommand('leek-fund.addNews', () => {
-      window
-        .showInputBox({ placeHolder: '请输入雪球用户ID（进入用户首页复制最后的数字串）' })
-        .then(async (id) => {
-          if (!id) {
-            return;
-          }
-          const newsUserIds = LeekFundConfig.getConfig('leek-fund.newsUserIds') || [];
-          if (newsUserIds.includes(id)) {
-            window.showInformationMessage(`ID为 ${id} 的用户已存在，无需添加`);
-            return;
-          }
-          try {
-            const list = await newsService.getNewsUserList([id]);
-            if (list.length === 1) {
-              newsUserIds.push(id);
-              LeekFundConfig.setConfig('leek-fund.newsUserIds', newsUserIds).then(() => {
-                newsProvider.refresh();
-              });
-            }
-          } catch (e) {
-            window.showErrorMessage(`获取用户（${id}）信息失败`);
-          }
-        });
-    })
-  );
-
-  context.subscriptions.push(
-    commands.registerCommand('leek-fund.deleteUser', (target) => {
-      const newsUserIds = LeekFundConfig.getConfig('leek-fund.newsUserIds') || [];
-      const newIds = newsUserIds.filter((id: string) => id !== target.id);
-      LeekFundConfig.setConfig('leek-fund.newsUserIds', newIds).then(() => {
-        newsProvider.refresh();
-      });
-    })
-  );
-
-  context.subscriptions.push(
-    commands.registerCommand('leek-fund.setXueqiuCookie', () => {
-      window
-        .showInputBox({
-          placeHolder:
-            '由于防爬虫机制，需要用户设置雪球网站 Cookie（进入雪球网站按F12——>NetWork 复制请求头的 Cookie 值）',
-        })
-        .then(async (cookieString = '') => {
-          const cookie = cookieString.trim();
-          if (!cookie) {
-            return;
-          }
-          LeekFundConfig.setConfig('leek-fund.xueqiuCookie', cookie).then(() => {
-            newsProvider.refresh();
-          });
-        });
+    commands.registerCommand('leek-fund.newItemClick', (news) => {
+      if (news && news.url) {
+        env.openExternal(Uri.parse(news.url));
+      }
     })
   );
 

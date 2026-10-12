@@ -65,7 +65,7 @@
         },
         {
           "id": "leekFundView.news",
-          "name": "XueQiu News"
+          "name": "资讯"
         },
         {
           "id": "leekFundView.binance",
@@ -91,11 +91,11 @@
         "icon": "$(gear)"
       },
       {
-        "command": "investment-monitor.customSetting",
+        "command": "leek-fund.customSetting",
         "title": "Leek: 个性定制"
       },
       {
-        "command": "investment-monitor.viewFundRank",
+        "command": "leek-fund.viewFundRank",
         "title": "基金排行榜",
         "icon": {
           "light": "resources/light/rank.svg",
@@ -253,7 +253,7 @@
       },
       {
         "command": "leek-fund.refreshFollow",
-        "title": "刷新关注列表",
+        "title": "刷新资讯",
         "icon": "$(refresh)"
       },
       {
@@ -263,19 +263,6 @@
           "light": "resources/light/news.svg",
           "dark": "resources/dark/news.svg"
         }
-      },
-      {
-        "command": "leek-fund.addNews",
-        "title": "添加关注雪球用户",
-        "icon": "$(add)"
-      },
-      {
-        "command": "leek-fund.viewUserTimeline",
-        "title": "查看动态（无头像）"
-      },
-      {
-        "command": "leek-fund.deleteUser",
-        "title": "取消关注"
       },
       {
         "command": "leek-fund.addBinancePair",
@@ -423,11 +410,6 @@
         },
         {
           "command": "leek-fund.toggleFlashNews",
-          "when": "view == leekFundView.news",
-          "group": "navigation"
-        },
-        {
-          "command": "leek-fund.addNews",
           "when": "view == leekFundView.news",
           "group": "navigation"
         },
@@ -671,20 +653,6 @@
           "default": false,
           "description": "是否隐藏状态栏图标"
         },
-        "leek-fund.newsUserIds": {
-          "type": "array",
-          "default": [
-            "5124430882",
-            "1287305957",
-            "1632326933"
-          ],
-          "description": "雪球用户id（进入雪球用户首页，复制/u/后的数字即可，比如 https://xueqiu.com/u/5124430882 链接的 5124430882）"
-        },
-        "leek-fund.xueqiuCookie": {
-          "type": "string",
-          "default": "",
-          "description": "由于防爬虫机制，需要用户设置雪球网站cookie"
-        },
         "leek-fund.fundAmount": {
           "type": "object",
           "default": {},
@@ -806,16 +774,12 @@
     },
     "viewsWelcome": [
       {
-        "view": "leekFundView.stock",
-        "contents": "\n [📰 个股新闻（韭研公社）](command:leek-fund.stockNews)"
-      },
-      {
         "view": "leekFundView.fund",
         "contents": "无数据，请检查网络或添加基金"
       },
       {
         "view": "leekFundView.stock",
-        "contents": "无数据，请检查网络或添加股票"
+        "contents": "\n [📰 个股新闻（韭研公社）](command:leek-fund.stockNews)\n无数据，请检查网络或添加股票"
       },
       {
         "view": "leekFundView.binance",
@@ -827,11 +791,11 @@
       },
       {
         "view": "leekFundView.news",
-        "contents": "无数据，请检查网络或添加关注用户"
+        "contents": "暂无快讯，请检查网络"
       },
       {
         "view": "leekFundView.settings",
-        "contents": "\n [🏠️ 韭菜中心](command:leek-fund.leekCenterView) \n [🤖️ AI助手配置](command:leek-fund.openAiConfig) \n [🎨个性定制](command:leek-fund.customSetting)\n[💰赞助插件](command:leek-fund.donate)\n[📄使用文档](https://github.com/LeekHub/leek-fund/issues/371)\n[📚投资交流](https://github.com/LeekHub/leek-fund/issues/19)\n源码[Github](https://github.com/LeekHub/leek-fund)"
+        "contents": "\n [🏠️ 韭菜中心](command:leek-fund.leekCenterView) \n [🤖️ AI助手配置](command:leek-fund.openAiConfig) \n [🎨个性定制](command:leek-fund.customSetting)"
       }
     ]
   },
@@ -843,8 +807,11 @@
     "watch": "tsc -watch -p ./",
     "pretest": "yarn run lint && yarn run compile",
     "test": "node ./out/_test/runTest.js",
+    "test:unit": "tsc -p ./ && mocha test/**/*.test.js",
+    "check:deps": "node ./scripts/check-deps.js",
+    "check:manifest": "node ./scripts/check-manifest-cli.js",
     "deploy": "vsce publish --yarn",
-    "package": "vsce package --yarn -o ./",
+    "package": "node ./scripts/check-deps.js && node ./scripts/check-manifest-cli.js && vsce package --yarn -o ./",
     "commitmsg": "commitlint -e $GIT_PARAMS",
     "release": "standard-version"
   },

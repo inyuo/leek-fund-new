@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 const JYG_API_BASE = 'https://app.jiuyangongshe.com/jystock-app/api/v2';
 const JYG_SEARCH_URL = `${JYG_API_BASE}/article/search`;
 const JYG_STOCK_ARTICLE_URL = `${JYG_API_BASE}/article/stock`;
+const JYG_COMMUNITY_URL = `${JYG_API_BASE}/article/community`;
 
 /**
  * 韭研公社接口鉴权盐值。
@@ -235,8 +236,36 @@ export async function fetchJYGNewsByCode(
   return sortByCreateTimeDesc(filtered.map(mapArticle)).slice(safeStart, safeStart + safeLimit);
 }
 
+/**
+ * 拉取社区流（全市场文章，服务端按时间倒序）。
+ *
+ * type=3 为「综合/题材」流，实测返回当天最新文章且带关联股票；
+ * type 为空会报 errCode 12000，故必须显式传入。
+ * 返回原始结构（保留 is_top 等字段），由调用方决定如何消费。
+ */
+export async function fetchJYGCommunityNews(
+  limit = 30,
+  start = 0,
+  type: string | number = 3,
+  options: JYGRequestOptions = {}
+): Promise<any[]> {
+  const safeLimit = Math.max(1, Math.min(100, limit));
+  const safeStart = Math.max(0, start);
+  // 多取置顶帖预留量，避免过滤 is_top 后不足量
+  const fetchLimit = Math.min(100, safeStart + safeLimit + TOP_PINNED_RESERVE);
+
+  const data = await jygPost(
+    JYG_COMMUNITY_URL,
+    { back_garden: 0, type, order: 1, limit: fetchLimit, start: safeStart },
+    options
+  );
+  const list: any[] = data?.data?.result || [];
+  return Array.isArray(list) ? list : [];
+}
+
 export default {
   fetchJYGNewsByCode,
+  fetchJYGCommunityNews,
   resolveJYGStock,
   buildJYGToken,
 };

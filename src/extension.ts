@@ -35,8 +35,10 @@ import createEastMoneyDataServer from './service/eastmoney';
 let loopTimer: NodeJS.Timeout | null = null;
 let binanceLoopTimer: NodeJS.Timeout | null = null;
 let forexLoopTimer: NodeJS.Timeout | null = null;
+let newsRefreshTimer: NodeJS.Timeout | null = null;
 let fundTreeView: TreeView<any> | null = null;
 let stockTreeView: TreeView<any> | null = null;
+let newsTreeView: TreeView<any> | null = null;
 let forexTreeView: TreeView<any> | null = null;
 let binanceTreeView: TreeView<any> | null = null;
 
@@ -101,7 +103,7 @@ export async function activate(context: ExtensionContext) {
     treeDataProvider: forexProvider,
   });
 
-  window.createTreeView('leekFundView.news', {
+  newsTreeView = window.createTreeView('leekFundView.news', {
     treeDataProvider: newsProvider,
   });
 
@@ -190,6 +192,13 @@ export async function activate(context: ExtensionContext) {
   };
 
   setIntervalTime();
+
+  /* 资讯（韭研社区流）7x24，不受休市影响，可见时每 30 秒刷新 */
+  newsRefreshTimer = setInterval(() => {
+    if (newsTreeView?.visible) {
+      newsProvider.refresh();
+    }
+  }, 30000);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   workspace.onDidChangeConfiguration((e: ConfigurationChangeEvent) => {
@@ -300,5 +309,9 @@ export function deactivate() {
   if (binanceLoopTimer) {
     clearInterval(binanceLoopTimer);
     binanceLoopTimer = null;
+  }
+  if (newsRefreshTimer) {
+    clearInterval(newsRefreshTimer);
+    newsRefreshTimer = null;
   }
 }
