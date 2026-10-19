@@ -79,3 +79,17 @@
   `opendate` 是否当天），作第三层降级的收益低于维护成本。备源只在主源失败时触发，
   此时粒度 B（分时曲线）同样是空的，所以不会出现「列表一个值、点进去另一个值」
   的跨源矛盾。
+
+## 后续追加
+
+- [x] **打包版本号带日期时间**（用户要求「每次打包产生变化」）：
+  新增 `scripts/package.js` 编排打包，版本生成 `1.0.YYYYMMDDHHmmss`
+  （例 `1.0.20261019170500`）——保持 1.0 主线前缀、时间戳单调递增以满足
+  VS Code「新版本必须大于旧版本」的更新要求、patch 无前导零故 semver 合法。
+  打包前临时写入 `package.json`，无论成败都用**原始字节还原**，
+  版本只体现在产物上，git 工作区保持干净。`package` 脚本改为
+  `node ./scripts/package.js`，原有 check-deps / check-manifest 前置检查保留。
+  新增 `test/package-version.test.js` 7 用例（格式/补零/同秒稳定/跨秒必变/
+  递增链/跨小时位数/semver），全量 **90 passing**。
+  产物 `investment-monitor-1.0.20261019170500.vsix`（3221 files / 6.37MB），
+  包内 `extension/package.json` 的 version 已确认为带日期的值。
