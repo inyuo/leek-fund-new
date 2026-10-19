@@ -50,8 +50,16 @@ interface JYGRequestOptions {
   token?: string;
 }
 
-/** 统一的 POST 封装：自动附加鉴权头、统一错误处理 */
-async function jygPost(url: string, payload: any, options: JYGRequestOptions = {}): Promise<any | null> {
+/**
+ * 韭研接口响应极不稳定（实测同一只股票连查 5 次：0.7s / 10.8s / 0.7s / 0.7s / 25.7s），
+ * 且 AI 分析链路是两跳串行（search 拿 stock_id → article/stock 拿文章），
+ * 任一跳失败都会让新闻附录整体丢失，模型于是回答"无法实时抓取"。
+ * 因此放宽超时并对失败自动重试一次。
+ */
+const JYG_TIMEOUT = 30000;
+const JYG_MAX_ATTEMPTS = 2;
+
+async function jygPostOnce(url: string, payload: any, options: JYGRequestOptions = {}): Promise<any | null> {
   const timestamp = Date.now().toString();
   const token = (options.token && options.token.trim()) || getTokenOverride() || buildJYGToken(timestamp);
 
@@ -67,7 +75,7 @@ async function jygPost(url: string, payload: any, options: JYGRequestOptions = {
         'User-Agent': DEFAULT_UA,
         Accept: 'application/json, text/plain, */*',
       },
-      timeout: 15000,
+      timeout: JYG_TIMEOUT,
       validateStatus: () => true,
     });
 
@@ -86,6 +94,18 @@ async function jygPost(url: string, payload: any, options: JYGRequestOptions = {
     console.error('[JYG] request error', url, e);
     return null;
   }
+}
+
+/** 统一的 POST 封装：自动附加鉴权头、超时重试、统一错误处理 */
+async function jygPost(url: string, payload: any, options: JYGRequestOptions = {}): Promise<any | null> {
+  for (let attempt = 1; attempt <= JYG_MAX_ATTEMPTS; attempt++) {
+    const data = await jygPostOnce(url, payload, options);
+    if (data) return data;
+    if (attempt < JYG_MAX_ATTEMPTS) {
+      console.warn(`[JYG] 第 ${attempt} 次请求失败，重试：${url}`);
+    }
+  }
+  return null;
 }
 
 function mapArticle(raw: any): JYGArticleItem {

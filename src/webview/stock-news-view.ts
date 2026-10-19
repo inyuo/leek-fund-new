@@ -57,7 +57,8 @@ export class StockNewsView {
           },
           { role: 'user', content: userMessage },
         ],
-        max_tokens: 4000,
+        // reasoning 思考模型的思考 token 计入该预算，4000 常在思考阶段就被截断导致 content 为空
+        max_tokens: 16000,
         temperature: 0.7,
       });
 

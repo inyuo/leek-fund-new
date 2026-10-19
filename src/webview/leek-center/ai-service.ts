@@ -106,7 +106,9 @@ export class AiService {
           },
           { role: "user", content: userMessage }
         ],
-        max_tokens: 4000,
+        // reasoning 思考模型的思考 token 计入该预算，4000 常在思考阶段就被截断
+        //（实测 finish_reason=length 且 content 为空，界面显示"抱歉，我没有收到回复"）
+        max_tokens: 16000,
         temperature: 0.7,
       });
       

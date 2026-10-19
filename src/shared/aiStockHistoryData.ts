@@ -70,7 +70,39 @@ async function fetchSohuQfqText(stockId: string, startCompact: string, endCompac
   if (!sohuCode) return '';
   const url = `http://q.stock.sohu.com/hisHq?code=${sohuCode}&start=${startCompact}&end=${endCompact}&stat=1&order=D&period=d&callback=historySearchHandler&rt=jsonp`;
   const response = await axios.get(url, { responseType: 'text' });
-  return typeof response === 'string' ? response : (response.data ? String(response.data) : '');
+  const raw = typeof response === 'string' ? response : response.data ? String(response.data) : '';
+  return parseSohuQfqToCsv(raw);
+}
+
+/**
+ * 搜狐 hisHq 的 JSONP 原文 → 干净 CSV。
+ *
+ * 该接口返回 `historySearchHandler([{status,hq:[[日期,开盘,收盘,涨跌额,涨跌幅,最低,最高,成交量,成交额,换手率,振幅]],stat:[...]}])`，
+ * 且 stat 字段为 GBK 编码，按 utf-8 解出是乱码。此前把整段 JSONP 原文直接拼进
+ * AI prompt（实测约 6.5k 字符，含乱码），既浪费 token 又干扰模型理解。
+ */
+export function parseSohuQfqToCsv(jsonp: string): string {
+  const text = String(jsonp || '').trim();
+  const start = text.indexOf('(');
+  const end = text.lastIndexOf(')');
+  if (start < 0 || end <= start) return '';
+
+  let payload: any;
+  try {
+    payload = JSON.parse(text.slice(start + 1, end));
+  } catch (e) {
+    return '';
+  }
+
+  const hq = Array.isArray(payload) && payload[0] ? payload[0].hq : null;
+  if (!Array.isArray(hq) || !hq.length) return '';
+
+  const lines = ['日期,开盘,收盘,涨跌幅,最低,最高,成交量(手),成交额(万)'];
+  for (const row of hq) {
+    if (!Array.isArray(row) || row.length < 9) continue;
+    lines.push([row[0], row[1], row[2], row[4], row[5], row[6], row[7], row[8]].join(','));
+  }
+  return lines.length > 1 ? lines.join('\n') : '';
 }
 
 async function fetchTencentHkQfqText(
