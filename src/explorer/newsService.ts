@@ -6,7 +6,9 @@
  */
 import { TreeItem } from 'vscode';
 import { fetchJYGCommunityNews } from '../webview/jiuyangongshe-news';
+import { fetchHeadlines } from '../shared/xxjwxcData';
 import { buildJYGNewsItems, JYGNewsItem } from './jygNews';
+import { buildHeadlineNewsItems } from './headlineNews';
 
 const MAX_LABEL_LENGTH = 60;
 /** 资讯刷新频率本就受控，缓存 30s 避免树刷新触发重复请求 */
@@ -73,14 +75,30 @@ export class NewsService {
   }
 
   private async fetchList(limit: number): Promise<NewsTreeItem[]> {
+    let items: NewsTreeItem[] = [];
+
+    // 主源：韭研公社社区流
     try {
       const rawList = await fetchJYGCommunityNews(limit);
-      const items = buildJYGNewsItems(rawList, limit).map((news) => new NewsTreeItem(news));
-      // 请求失败时保留旧数据，避免刷新后清空列表
-      return items.length > 0 ? items : this.cache;
+      items = buildJYGNewsItems(rawList, limit).map((news) => new NewsTreeItem(news));
     } catch (e) {
       console.error('[资讯] 拉取社区流失败', e);
-      return this.cache;
     }
+
+    // 主源为空/失败 → 降级到 xxjwxc 财经头条，避免视图整片空白
+    if (items.length === 0) {
+      try {
+        const titles = await fetchHeadlines();
+        items = buildHeadlineNewsItems(titles, limit).map((news) => new NewsTreeItem(news));
+        if (items.length > 0) {
+          console.warn('[资讯] 社区流不可用，已回退到财经头条');
+        }
+      } catch (e) {
+        console.error('[资讯] 拉取财经头条失败', e);
+      }
+    }
+
+    // 两个源都失败时保留旧数据，避免刷新后清空列表
+    return items.length > 0 ? items : this.cache;
   }
 }

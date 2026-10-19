@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>资金动态</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--vscode-editor-background, #1e1e1e);
+        color: var(--vscode-editor-foreground, #cccccc);
+        font-family: var(--vscode-font-family, system-ui, 'Microsoft YaHei', sans-serif);
+        font-size: 13px;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      /* ---------- 顶栏 ---------- */
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
+        background: var(--vscode-sideBar-background, transparent);
+        flex: 0 0 auto;
+      }
+      .topbar h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .topbar .meta {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+      }
+      .topbar .spacer {
+        flex: 1;
+      }
+      .btn {
+        cursor: pointer;
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-background, #0e639c);
+        color: var(--vscode-button-foreground, #fff);
+        border-radius: 3px;
+        padding: 4px 12px;
+        font-size: 12px;
+      }
+      .btn:hover {
+        background: var(--vscode-button-hoverBackground, #1177bb);
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      /* ---------- 主布局 ---------- */
+      .layout {
+        flex: 1 1 auto;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px;
+        min-height: 0;
+      }
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        border: 1px solid var(--vscode-panel-border, #444);
+        border-radius: 6px;
+        background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.05));
+        overflow: hidden;
+      }
+      .panel > header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
+        background: var(--vscode-titleBar-activeBackground, rgba(128, 128, 128, 0.08));
+        flex: 0 0 auto;
+      }
+      .panel > header .hint {
+        margin-left: auto;
+        font-weight: 400;
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 11px;
+      }
+      .panel > .body {
+        flex: 1 1 auto;
+        overflow: auto;
+        min-height: 0;
+      }
+
+      /* ---------- A 自选股列表 ---------- */
+      .stock-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
+        align-items: center;
+        padding: 7px 10px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.15));
+      }
+      .stock-row:hover {
+        background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+      }
+      .stock-row.active {
+        background: var(--vscode-list-activeSelectionBackground, #094771);
+        color: var(--vscode-list-activeSelectionForeground, #fff);
+      }
+      .stock-row .code {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .stock-row .net {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .stock-row .sub {
+        grid-column: 1 / -1;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground, #999);
+      }
+
+      /* ---------- 详情 ---------- */
+      .detail-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 14px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
+        flex: 0 0 auto;
+      }
+      .detail-head .name {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .detail-head .code {
+        font-family: var(--vscode-editor-font-family, monospace);
+        color: var(--vscode-descriptionForeground, #999);
+      }
+      .detail-head .price {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .detail-head .net {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 15px;
+      }
+
+      /* ---------- 画布 ---------- */
+      .chart-wrap {
+        position: relative;
+        flex: 0 0 auto;
+        height: 260px;
+        padding: 6px 8px;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .tooltip {
+        position: absolute;
+        pointer-events: none;
+        padding: 5px 8px;
+        font-size: 11px;
+        line-height: 1.6;
+        border-radius: 4px;
+        background: var(--vscode-editorWidget-background, #252526);
+        border: 1px solid var(--vscode-editorWidget-border, #454545);
+        color: var(--vscode-editorWidget-foreground, #cccccc);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        display: none;
+        white-space: nowrap;
+        z-index: 5;
+      }
+
+      /* ---------- 右下三栏 ---------- */
+      .right-bottom {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        min-height: 0;
+        flex: 1 1 auto;
+        padding-top: 10px;
+      }
+      .right-bottom .panel {
+        min-height: 160px;
+      }
+
+      /* 板块 / 行业行 */
+      .line-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.15));
+      }
+      .line-item .nm {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .line-item .vl {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      /* D 区条形（相对最大绝对值） */
+      .bar {
+        grid-column: 1 / -1;
+        height: 3px;
+        border-radius: 2px;
+        background: rgba(128, 128, 128, 0.18);
+        overflow: hidden;
+        margin-top: 3px;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+      }
+
+      /* 分析结论 */
+      .analysis {
+        padding: 8px 10px;
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .empty {
+        padding: 24px 12px;
+        text-align: center;
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+        line-height: 1.8;
+      }
+      .positive {
+        color: var(--vscode-charts-red, #f14c4c);
+      }
+      .negative {
+        color: var(--vscode-charts-green, #4ec9b0);
+      }
+      .neutral {
+        color: var(--vscode-descriptionForeground, #999);
+      }
+      .loading {
+        opacity: 0.55;
+      }
+      .status {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground, #999);
+      }
+      .status.error {
+        color: var(--vscode-charts-red, #f14c4c);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <h1>资金动态</h1>
+      <span class="meta" id="updatedAt">加载中…</span>
+      <span class="status" id="status"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="refreshBtn">刷新</button>
+    </div>
+
+    <div class="layout">
+      <!-- 粒度 A：每只自选股当日主力净流入 -->
+      <section class="panel">
+        <header>自选股 · 当日主力净流入 <span class="hint" id="stockCount"></span></header>
+        <div class="body" id="stockList">
+          <div class="empty">正在加载自选股资金流…</div>
+        </div>
+      </section>
+
+      <div style="display: flex; flex-direction: column; min-width: 0; min-height: 0">
+        <section class="panel" style="flex: 0 0 auto">
+          <header>
+            <span id="detailTitle">分时资金流</span>
+            <span class="hint" id="detailHint">点击左侧股票查看详情</span>
+          </header>
+
+          <div class="detail-head" id="detailHead" style="display: none">
+            <span class="name" id="dName"></span>
+            <span class="code" id="dCode"></span>
+            <span class="price" id="dPrice"></span>
+            <span class="price" id="dPct"></span>
+            <span class="net" id="dNet"></span>
+            <span class="meta" id="dTm"></span>
+          </div>
+
+          <!-- 粒度 B：单股分时价格 + 主力净流入（canvas 双轴） -->
+          <div class="chart-wrap" id="chartWrap">
+            <canvas id="chart"></canvas>
+            <div class="tooltip" id="tooltip"></div>
+          </div>
+          <div id="chartEmpty" class="empty" style="display: none">
+            暂无该股分时资金数据<br />点击左侧任一 A 股查看
+          </div>
+        </section>
+
+        <!-- 粒度 C / D / 第三方分析 -->
+        <div class="right-bottom">
+          <section class="panel">
+            <header>所属板块 <span class="hint">粒度 C</span></header>
+            <div class="body" id="sectorList">
+              <div class="empty">暂无数据</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header>全行业主力资金流 <span class="hint" id="industryHint">粒度 D</span></header>
+            <div class="body" id="industryList">
+              <div class="empty">正在加载行业资金流…</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header>第三方量化分析 <span class="hint">xxjwxc</span></header>
+            <div class="body" id="analysisBox">
+              <div class="empty">暂无数据</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var vscode = acquireVsCodeApi();
+
+        /** 保存选中项，面板复用/隐藏后恢复 */
+        var saved = vscode.getState() || {};
+        var selectedCode = saved.selectedCode || '';
+        var stockRows = [];
+        var currentFlow = null; // 当前展示的分时数据（供重绘用）
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        /** 读取 VS Code 主题色，canvas 需要显式取值 */
+        function cssVar(name, fallback) {
+          var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+          return v && v.trim() ? v.trim() : fallback;
+        }
+
+        /** 主题色板直接读 CSS 变量（查 DOM 元素会因元素尚未渲染而取不到） */
+        function themeColor(name, fallback) {
+          return cssVar(name, fallback);
+        }
+
+        function fmtAmount(n) {
+          if (n === null || n === undefined || isNaN(Number(n))) return '—';
+          var v = Number(n);
+          var abs = Math.abs(v);
+          var sign = v >= 0 ? '+' : '-';
+          if (abs >= 1e8) return sign + (abs / 1e8).toFixed(2) + '亿';
+          if (abs >= 1e4) return sign + (abs / 1e4).toFixed(2) + '万';
+          return sign + abs.toFixed(0);
+        }
+
+        function fmtPct(n) {
+          if (n === null || n === undefined || isNaN(Number(n))) return '—';
+          var v = Number(n);
+          return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+        }
+
+        function signClass(n) {
+          if (n === null || n === undefined || isNaN(Number(n))) return 'neutral';
+          if (Number(n) > 0) return 'positive';
+          if (Number(n) < 0) return 'negative';
+          return 'neutral';
+        }
+
+        function escapeHtml(s) {
+          return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        }
+
+        function setStatus(text, isError) {
+          var el = $('status');
+          el.textContent = text || '';
+          el.className = 'status' + (isError ? ' error' : '');
+        }
+
+        /* ================= 粒度 A：自选股列表 ================= */
+        function renderStocks(data) {
+          stockRows = (data && data.stocks) || [];
+          var total = data && typeof data.total === 'number' ? data.total : 0;
+          var nonA = total - stockRows.length;
+          $('stockCount').textContent = stockRows.length
+            ? stockRows.length + ' 只 A 股'
+            : '';
+
+          var box = $('stockList');
+          if (!stockRows.length) {
+            box.innerHTML =
+              '<div class="empty">自选股中没有 A 股代码' +
+              (total ? '<br />共 ' + total + ' 只，非 A 股已跳过' : '') +
+              '<br />在自选股里添加 sh600519 这类代码后刷新</div>';
+            return;
+          }
+
+          var html = '';
+          for (var i = 0; i < stockRows.length; i++) {
+            var r = stockRows[i];
+            var cls = signClass(r.mainNet);
+            var active = r.code === selectedCode ? ' active' : '';
+            html +=
+              '<div class="stock-row' +
+              active +
+              '" data-code="' +
+              escapeHtml(r.code) +
+              '">' +
+              '<span class="code">' +
+              escapeHtml(r.code) +
+              '</span>' +
+              '<span class="net ' +
+              cls +
+              '">' +
+              fmtAmount(r.mainNet) +
+              '</span>' +
+              (r.tm
+                ? '<span class="sub">数据日期 ' + escapeHtml(r.tm) + '</span>'
+                : r.source === 'east'
+                ? '<span class="sub">备用数据源 · 仅当日累计（无分时曲线）</span>'
+                : '<span class="sub">主力资金数据暂缺</span>') +
+              '</div>';
+          }
+          box.innerHTML = html;
+
+          var rows = box.querySelectorAll('.stock-row');
+          for (var j = 0; j < rows.length; j++) {
+            rows[j].addEventListener('click', function () {
+              selectStock(this.getAttribute('data-code'));
+            });
+          }
+        }
+
+        /* ================= 粒度 D：行业排名 ================= */
+        function renderIndustry(data) {
+          var rows = (data && data.industry) || [];
+          var box = $('industryList');
+          if (!rows.length) {
+            box.innerHTML = '<div class="empty">暂无行业资金数据<br />稍后重试</div>';
+            $('industryHint').textContent = '粒度 D';
+            return;
+          }
+
+          // 东财源带 BK 板块代码（全量），xxjwxc 降级源无代码（仅 12 个主要行业）
+          var full = false;
+          for (var c = 0; c < rows.length; c++) {
+            if (rows[c].code) full = true;
+          }
+          $('industryHint').textContent = full
+            ? '粒度 D · 东财 ' + rows.length
+            : '粒度 D · 备用源 主要行业 ' + rows.length;
+
+          var maxAbs = 0;
+          for (var i = 0; i < rows.length; i++) {
+            maxAbs = Math.max(maxAbs, Math.abs(Number(rows[i].amount) || 0));
+          }
+          if (maxAbs <= 0) maxAbs = 1;
+
+          var html = '';
+          for (var k = 0; k < rows.length; k++) {
+            var r = rows[k];
+            var amt = Number(r.amount) || 0;
+            var pct = ((Math.abs(amt) / maxAbs) * 100).toFixed(1);
+            var color = amt >= 0 ? 'positive' : 'negative';
+            var bg = amt >= 0 ? themeColor('--vscode-charts-red', '#f14c4c') : themeColor('--vscode-charts-green', '#4ec9b0');
+            html +=
+              '<div class="line-item">' +
+              '<span class="nm">' +
+              escapeHtml(r.name) +
+              '</span>' +
+              '<span class="vl ' +
+              color +
+              '">' +
+              fmtAmount(amt) +
+              (r.ratio ? ' <span class="neutral">(' + r.ratio.toFixed(2) + '%)</span>' : '') +
+              '</span>' +
+              '<span class="bar"><i style="width:' +
+              pct +
+              '%;background:' +
+              bg +
+              '"></i></span>' +
+              '</div>';
+          }
+          box.innerHTML = html;
+        }
+
+        /* ================= 粒度 C + 分析 ================= */
+        function renderDetail(d) {
+          $('detailHead').style.display = 'flex';
+          $('detailHint').textContent = '';
+
+          var flow = d.mainFlow;
+          var last = flow && flow.main && flow.main.length ? flow.main[flow.main.length - 1] : null;
+
+          $('dName').textContent = d.name || '';
+          $('dCode').textContent = d.code || '';
+          $('dPrice').textContent = d.price ? Number(d.price).toFixed(2) : '—';
+          $('dPrice').className = 'price ' + (d.price ? signClass(d.percent) : 'neutral');
+          $('dPct').textContent = d.price ? fmtPct(d.percent) : '';
+          $('dPct').className = 'price ' + signClass(d.percent);
+          $('dNet').textContent = last === null ? '主力净流入 —' : '主力净流入 ' + fmtAmount(last);
+          $('dNet').className = 'net ' + signClass(last);
+          $('dTm').textContent = flow && flow.tm ? flow.tm : '';
+          $('detailTitle').textContent = (d.name || d.code || '个股') + ' · 分时资金流';
+
+          // C：所属板块
+          var sectors = d.sectors || [];
+          var secBox = $('sectorList');
+          if (!sectors.length) {
+            secBox.innerHTML = '<div class="empty">暂无所属板块数据</div>';
+          } else {
+            var sh = '';
+            for (var i = 0; i < sectors.length; i++) {
+              var s = sectors[i];
+              sh +=
+                '<div class="line-item">' +
+                '<span class="nm">' +
+                escapeHtml(s.name) +
+                '</span>' +
+                '<span class="vl ' +
+                signClass(s.percent) +
+                '">' +
+                fmtPct(s.percent) +
+                '</span>' +
+                '</div>';
+            }
+            secBox.innerHTML = sh;
+          }
+
+          // 第三方分析
+          var anaBox = $('analysisBox');
+          anaBox.innerHTML = d.analysis
+            ? '<div class="analysis">' + escapeHtml(d.analysis) + '</div>'
+            : '<div class="empty">暂无分析结论</div>';
+
+          // B：分时曲线
+          currentFlow = flow;
+          var hasChart = flow && flow.price && flow.price.length && flow.main && flow.main.length;
+          $('chartEmpty').style.display = hasChart ? 'none' : 'block';
+          $('chartWrap').style.display = hasChart ? 'block' : 'none';
+          if (hasChart) {
+            drawChart();
+          }
+        }
+
+        /* ================= 粒度 B：canvas 双轴图 ================= */
+        /** A 股交易 240 分钟，按索引等分估算时刻（09:30-11:30 / 13:00-15:00） */
+        function timeAt(i, n) {
+          var mins = Math.round((i * 240) / Math.max(1, n));
+          var h, m;
+          if (mins <= 120) {
+            h = 9;
+            m = 30 + mins;
+          } else {
+            h = 13;
+            m = mins - 120;
+          }
+          while (m >= 60) {
+            h += 1;
+            m -= 60;
+          }
+          return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+        }
+
+        function drawChart() {
+          var canvas = $('chart');
+          var wrap = $('chartWrap');
+          if (!canvas || !currentFlow) return;
+
+          var rect = wrap.getBoundingClientRect();
+          var w = rect.width - 16;
+          var h = rect.height - 12;
+          if (w <= 0 || h <= 0) return;
+
+          var dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          canvas.style.width = w + 'px';
+          canvas.style.height = h + 'px';
+
+          var ctx = canvas.getContext('2d');
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+
+          var price = currentFlow.price || [];
+          var main = currentFlow.main || [];
+          var n = Math.min(price.length, main.length);
+          if (!n) return;
+
+          var padL = 62;
+          var padR = 68;
+          var padT = 14;
+          var padB = 22;
+          var plotW = w - padL - padR;
+          var plotH = h - padT - padB;
+          if (plotW <= 0 || plotH <= 0) return;
+
+          var fg = cssVar('--vscode-descriptionForeground', '#9d9d9d');
+          var grid = cssVar('--vscode-editorWidget-border', 'rgba(128,128,128,.25)');
+          var upColor = themeColor('--vscode-charts-red', '#f14c4c');
+          var downColor = themeColor('--vscode-charts-green', '#4ec9b0');
+          var lineColor = cssVar('--vscode-charts-line', '#75beff');
+
+          // 价格范围
+          var pMin = Infinity;
+          var pMax = -Infinity;
+          for (var i = 0; i < n; i++) {
+            if (price[i] < pMin) pMin = price[i];
+            if (price[i] > pMax) pMax = price[i];
+          }
+          if (pMin === pMax) {
+            pMin -= 1;
+            pMax += 1;
+          }
+          var pPad = (pMax - pMin) * 0.08;
+          pMin -= pPad;
+          pMax += pPad;
+
+          // 资金范围（必须包含 0 线）
+          var mMin = 0;
+          var mMax = 0;
+          for (var j = 0; j < n; j++) {
+            if (main[j] < mMin) mMin = main[j];
+            if (main[j] > mMax) mMax = main[j];
+          }
+          var mAbs = Math.max(Math.abs(mMin), Math.abs(mMax));
+          if (mAbs === 0) mAbs = 1;
+          mMin = -mAbs;
+          mMax = mAbs;
+
+          var xOf = function (i) {
+            return padL + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+          };
+          var yPrice = function (v) {
+            return padT + plotH - ((v - pMin) / (pMax - pMin)) * plotH;
+          };
+          var yMain = function (v) {
+            return padT + plotH - ((v - mMin) / (mMax - mMin)) * plotH;
+          };
+
+          // 网格 + 价格轴（左）
+          ctx.font = '10px ' + cssVar('--vscode-editor-font-family', 'monospace');
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+          ctx.strokeStyle = grid;
+          ctx.fillStyle = fg;
+          var steps = 4;
+          for (var s = 0; s <= steps; s++) {
+            var val = pMin + ((pMax - pMin) * s) / steps;
+            var y = yPrice(val);
+            ctx.beginPath();
+            ctx.moveTo(padL, y);
+            ctx.lineTo(padL + plotW, y);
+            ctx.globalAlpha = 0.35;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillText(val.toFixed(2), padL - 6, y);
+          }
+
+          // 资金轴（右）
+          ctx.textAlign = 'left';
+          for (var t = 0; t <= 2; t++) {
+            var mval = mMin + ((mMax - mMin) * t) / 2;
+            ctx.fillText(fmtAmount(mval), padL + plotW + 6, yMain(mval));
+          }
+
+          // 资金面积：按相邻点均值正负分段着色
+          var zeroY = yMain(0);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(padL, padT, plotW, plotH);
+          ctx.clip();
+
+          for (var k = 1; k < n; k++) {
+            var avg = (main[k - 1] + main[k]) / 2;
+            ctx.beginPath();
+            ctx.moveTo(xOf(k - 1), zeroY);
+            ctx.lineTo(xOf(k - 1), yMain(main[k - 1]));
+            ctx.lineTo(xOf(k), yMain(main[k]));
+            ctx.lineTo(xOf(k), zeroY);
+            ctx.closePath();
+            ctx.globalAlpha = 0.32;
+            ctx.fillStyle = avg >= 0 ? upColor : downColor;
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+
+          // 资金折线
+          ctx.beginPath();
+          for (var p = 0; p < n; p++) {
+            if (p === 0) ctx.moveTo(xOf(p), yMain(main[p]));
+            else ctx.lineTo(xOf(p), yMain(main[p]));
+          }
+          ctx.globalAlpha = 0.75;
+          ctx.strokeStyle = main[n - 1] >= 0 ? upColor : downColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+
+          // 价格折线
+          ctx.beginPath();
+          for (var q = 0; q < n; q++) {
+            if (q === 0) ctx.moveTo(xOf(q), yPrice(price[q]));
+            else ctx.lineTo(xOf(q), yPrice(price[q]));
+          }
+          ctx.strokeStyle = lineColor;
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+
+          // 0 轴
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = fg;
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath();
+          ctx.moveTo(padL, zeroY);
+          ctx.lineTo(padL + plotW, zeroY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          ctx.restore();
+
+          // 时间轴
+          ctx.fillStyle = fg;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          var ticks = 5;
+          for (var u = 0; u <= ticks; u++) {
+            var idx = Math.round((u * (n - 1)) / ticks);
+            ctx.fillText(timeAt(idx, n), xOf(idx), padT + plotH + 6);
+          }
+
+          // 图例
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          var lx = padL;
+          ctx.fillStyle = lineColor;
+          ctx.fillRect(lx, 2, 12, 2);
+          ctx.fillStyle = fg;
+          ctx.fillText('价格', lx + 16, -1);
+          ctx.fillStyle = main[n - 1] >= 0 ? upColor : downColor;
+          ctx.fillRect(lx + 58, 2, 12, 6);
+          ctx.fillStyle = fg;
+          ctx.fillText('主力净流入', lx + 74, -1);
+
+          canvas._geom = {
+            n: n,
+            padL: padL,
+            plotW: plotW,
+            xOf: xOf,
+            yPrice: yPrice,
+            yMain: yMain,
+          };
+        }
+
+        function bindChartHover() {
+          var canvas = $('chart');
+          var tip = $('tooltip');
+          canvas.addEventListener('mousemove', function (e) {
+            var geom = canvas._geom;
+            if (!geom || !currentFlow) {
+              tip.style.display = 'none';
+              return;
+            }
+            var rect = canvas.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var ratio = (x - geom.padL) / geom.plotW;
+            if (ratio < -0.02 || ratio > 1.02) {
+              tip.style.display = 'none';
+              return;
+            }
+            var idx = Math.round(ratio * (geom.n - 1));
+            idx = Math.max(0, Math.min(geom.n - 1, idx));
+
+            var pr = currentFlow.price[idx];
+            var mn = currentFlow.main[idx];
+            tip.innerHTML =
+              '<b>' +
+              timeAt(idx, geom.n) +
+              '</b>（约）<br/>价格 ' +
+              Number(pr).toFixed(2) +
+              '<br/>主力 <span class="' +
+              signClass(mn) +
+              '">' +
+              fmtAmount(mn) +
+              '</span>';
+            tip.style.display = 'block';
+
+            var wrapRect = $('chartWrap').getBoundingClientRect();
+            var left = e.clientX - wrapRect.left + 14;
+            if (left + tip.offsetWidth > wrapRect.width - 4) {
+              left = e.clientX - wrapRect.left - tip.offsetWidth - 14;
+            }
+            tip.style.left = Math.max(0, left) + 'px';
+            tip.style.top = Math.max(0, e.clientY - wrapRect.top - 10) + 'px';
+          });
+          canvas.addEventListener('mouseleave', function () {
+            tip.style.display = 'none';
+          });
+        }
+
+        /* ================= 交互 ================= */
+        function selectStock(code) {
+          if (!code) return;
+          selectedCode = code;
+          vscode.setState({ selectedCode: code });
+
+          var rows = document.querySelectorAll('.stock-row');
+          for (var i = 0; i < rows.length; i++) {
+            rows[i].className =
+              'stock-row' + (rows[i].getAttribute('data-code') === code ? ' active' : '');
+          }
+
+          $('detailHint').textContent = '加载中…';
+          $('analysisBox').innerHTML = '<div class="empty">加载中…</div>';
+          $('sectorList').innerHTML = '<div class="empty">加载中…</div>';
+          vscode.postMessage({ command: 'select', code: code });
+        }
+
+        /** 收到 init 后：恢复上次选中，否则选第一只 */
+        function autoSelect() {
+          if (selectedCode) {
+            var found = false;
+            for (var i = 0; i < stockRows.length; i++) {
+              if (stockRows[i].code === selectedCode) found = true;
+            }
+            if (found) {
+              selectStock(selectedCode);
+              return;
+            }
+          }
+          if (stockRows.length) selectStock(stockRows[0].code);
+        }
+
+        /* ================= 消息 ================= */
+        window.addEventListener('message', function (event) {
+          var msg = event.data;
+          if (!msg || !msg.type) return;
+
+          if (msg.type === 'init') {
+            setStatus('');
+            // 服务端指定的初始选中股（右键入口），优先于上次记忆
+            if (msg.data && msg.data.initialCode) {
+              selectedCode = msg.data.initialCode;
+              vscode.setState({ selectedCode: selectedCode });
+            }
+            renderStocks(msg.data);
+            renderIndustry(msg.data);
+            var ts = msg.data && msg.data.updatedAt;
+            $('updatedAt').textContent = ts
+              ? '更新于 ' + new Date(ts).toLocaleTimeString()
+              : '';
+            autoSelect();
+          } else if (msg.type === 'detail') {
+            setStatus('');
+            renderDetail(msg.data || {});
+          }
+        });
+
+        $('refreshBtn').addEventListener('click', function () {
+          var btn = $('refreshBtn');
+          btn.disabled = true;
+          setStatus('刷新中…');
+          $('stockList').innerHTML = '<div class="empty">正在加载自选股资金流…</div>';
+          $('industryList').innerHTML = '<div class="empty">正在加载行业资金流…</div>';
+          vscode.postMessage({ command: 'refresh' });
+          setTimeout(function () {
+            btn.disabled = false;
+          }, 1500);
+        });
+
+        window.addEventListener('resize', function () {
+          if (currentFlow) drawChart();
+        });
+
+        bindChartHover();
+
+        // 恢复上次选中项
+        if (saved.selectedCode) selectedCode = saved.selectedCode;
+
+        setStatus('连接中…');
+        vscode.postMessage({ command: 'ready' });
+      })();
+    </script>
+  </body>
+</html>

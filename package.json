@@ -236,6 +236,15 @@
         "icon": "$(lightbulb)"
       },
       {
+        "command": "leek-fund.viewStockFundFlow",
+        "title": "资金动态（自选股主力净流入 / 分时资金流 / 行业资金流）"
+      },
+      {
+        "command": "leek-fund.stockFundFlowForStock",
+        "title": "查看该股资金动态",
+        "icon": "$(pulse)"
+      },
+      {
         "command": "leek-fund.addStockToBar",
         "title": "添加至状态栏"
       },
@@ -514,6 +523,11 @@
           "command": "leek-fund.aiStockAnalysis",
           "when": "view == leekFundView.stock && (viewItem == aStock || viewItem == hkStock)",
           "group": "inline"
+        },
+        {
+          "command": "leek-fund.stockFundFlowForStock",
+          "when": "view == leekFundView.stock && viewItem == aStock",
+          "group": "group3"
         },
         {
           "command": "leek-fund.deleteStock",

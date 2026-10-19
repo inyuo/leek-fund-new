@@ -289,6 +289,20 @@ export function registerViewEvent(
   context.subscriptions.push(
     commands.registerCommand('leek-fund.viewMainFundFlow', () => mainFundFlow())
   );
+  // 资金动态（自选股主力净流入 / 分时资金流 / 行业资金流）
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.viewStockFundFlow', () => {
+      const { stockFundFlow } = require('./webview/stockFundFlow');
+      stockFundFlow();
+    })
+  );
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.stockFundFlowForStock', (target) => {
+      const { stockFundFlow } = require('./webview/stockFundFlow');
+      const code = (target && (target.id || (target.info && target.info.code))) || '';
+      stockFundFlow(typeof code === 'string' ? code : '');
+    })
+  );
   // 基金置顶
   context.subscriptions.push(
     commands.registerCommand('leek-fund.setFundTop', (target) => {

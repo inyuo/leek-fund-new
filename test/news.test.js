@@ -160,3 +160,93 @@ describe('资讯刷新（缓存与强制刷新）', () => {
     assert.strictEqual(counter.calls, 2, '刷新结果应被缓存，不应再次请求');
   });
 });
+
+describe('资讯降级：xxjwxc 财经头条转换', () => {
+  const { buildHeadlineNewsItems } = require('../out/explorer/headlineNews');
+
+  it('把标题数组转成资讯条目', () => {
+    const items = buildHeadlineNewsItems(['头条A', '头条B'], 10);
+    assert.strictEqual(items.length, 2);
+    assert.strictEqual(items[0].title, '头条A');
+    assert.ok(items[0].id, '必须有 id');
+    assert.ok(items[0].url, '必须有 url 供点击打开');
+    assert.strictEqual(items[0].stocksLabel, '', '头条无关联股票');
+    assert.strictEqual(typeof items[0].time, 'number');
+  });
+
+  it('跳过空标题并按 limit 截断', () => {
+    const items = buildHeadlineNewsItems(['', '   ', '有效标题', '另一条'], 1);
+    assert.strictEqual(items.length, 1, '空标题应被跳过，且受 limit 约束');
+    assert.strictEqual(items[0].title, '有效标题');
+  });
+
+  it('id 在同一批内唯一（否则树节点身份会互相覆盖）', () => {
+    const items = buildHeadlineNewsItems(['甲', '乙', '丙'], 10);
+    const ids = items.map((i) => i.id);
+    assert.strictEqual(new Set(ids).size, ids.length, `id 重复：${ids.join(',')}`);
+  });
+
+  it('空/异常输入返回空数组', () => {
+    assert.deepStrictEqual(buildHeadlineNewsItems(null, 10), []);
+    assert.deepStrictEqual(buildHeadlineNewsItems([], 10), []);
+    assert.deepStrictEqual(buildHeadlineNewsItems('bad', 10), []);
+  });
+});
+
+describe('资讯降级触发：韭研失败时回退头条', () => {
+  const { NewsService } = require('../out/explorer/newsService');
+  const newsModule = require('../out/webview/jiuyangongshe-news');
+  const xxjModule = require('../out/shared/xxjwxcData');
+  const originalJyg = newsModule.fetchJYGCommunityNews;
+  const originalHeadline = xxjModule.fetchHeadlines;
+
+  afterEach(() => {
+    newsModule.fetchJYGCommunityNews = originalJyg;
+    xxjModule.fetchHeadlines = originalHeadline;
+  });
+
+  it('韭研返回空时回退到财经头条', async () => {
+    newsModule.fetchJYGCommunityNews = async () => [];
+    xxjModule.fetchHeadlines = async () => ['头条A', '头条B'];
+
+    const list = await new NewsService().getNewsList(5);
+    assert.strictEqual(list.length, 2, '应展示头条而不是空列表');
+    assert.strictEqual(list[0].news.title, '头条A');
+  });
+
+  it('韭研抛错时同样回退', async () => {
+    newsModule.fetchJYGCommunityNews = async () => {
+      throw new Error('timeout of 30000ms exceeded');
+    };
+    xxjModule.fetchHeadlines = async () => ['头条X'];
+
+    const list = await new NewsService().getNewsList(5);
+    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list[0].news.title, '头条X');
+  });
+
+  it('两个源都失败时返回空数组而不抛异常', async () => {
+    newsModule.fetchJYGCommunityNews = async () => {
+      throw new Error('boom');
+    };
+    xxjModule.fetchHeadlines = async () => {
+      throw new Error('boom2');
+    };
+
+    const list = await new NewsService().getNewsList(5);
+    assert.deepStrictEqual(list, []);
+  });
+
+  it('韭研正常时不调用头条源（避免多余请求）', async () => {
+    let headlineCalls = 0;
+    newsModule.fetchJYGCommunityNews = async () => [makeArticle('a1', '韭研文章')];
+    xxjModule.fetchHeadlines = async () => {
+      headlineCalls += 1;
+      return ['不该被调用'];
+    };
+
+    const list = await new NewsService().getNewsList(5);
+    assert.strictEqual(list[0].news.title, '韭研文章');
+    assert.strictEqual(headlineCalls, 0, '主源正常时不应触发降级');
+  });
+});

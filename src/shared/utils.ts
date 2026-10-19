@@ -552,3 +552,44 @@ export function getResourcesImageSrc(
     );
   });
 }
+
+/**
+ * 限流并发：最多 `limit` 个任务同时执行，结果顺序与输入一致。
+ *
+ * 用于批量调用第三方接口 —— 实测短时间高并发请求会触发反爬
+ * （东财 fflow 连打数次后返回 Empty reply from server），逐股取数必须限流。
+ *
+ * 任一任务抛错则整体 reject，由调用方自行 catch 后按"该数据缺失"降级。
+ * limit 非法（0 / 负数 / NaN）时退化为逐个执行，避免死循环。
+ */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return [];
+
+  const conc =
+    typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? Math.min(Math.floor(limit), list.length)
+      : 1;
+
+  const results: R[] = new Array(list.length);
+  let cursor = 0;
+
+  const worker = async (): Promise<void> => {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await task(list[index], index);
+    }
+  };
+
+  const workers: Array<Promise<void>> = [];
+  for (let i = 0; i < conc; i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return results;
+}
