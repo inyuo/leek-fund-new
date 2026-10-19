@@ -46,7 +46,10 @@
       **数据一致性**（列表末值 == 详情末值 297097790）· 非 A 股空详情不发请求
 - [x] 7c. 东财限流态验证：`toSecid` 全对、被限流时返回 null/空数组**不抛错**、
       重试 1 次生效、日志精简为单行（原 axios error 带 config/request 会刷屏）
-- [ ] 8. 提交 + 重新打包 vsix
+- [x] 8. 提交 `65842fb`（15 files / +2692，husky lint + commitlint 通过）+
+      重新打包 `investment-monitor-1.0.0.vsix`（3221 files / 6.37MB）；
+      打包后核验：6 个新文件全部进包，并修复 `.vscodeignore` 漏掉的
+      `docs/**`（进度文件首次打包时被带入，已排除并复验零泄漏）
 
 ## 设计约束（沿用既有教训）
 
