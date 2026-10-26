@@ -97,24 +97,44 @@ export async function fetchStockMainFlow(code: string): Promise<MainFlowData | n
   };
 }
 
+/** 个股第三方分析的一个分组（如「PEG估值」下的多条指标） */
+export interface AnalysisGroup {
+  name: string;
+  msgs: string[];
+}
+
 /**
- * 个股第三方分析结论（PEG、最佳均线回测、次日预测、综合评分、机构参与度）。
- * 这是 xxjwxc 独有的数据，东财/新浪没有对应接口。
- * 返回已格式化的多行文本，便于直接拼进 AI prompt 或渲染。
+ * 个股第三方分析结论的**结构化**形式（PEG、最佳均线回测、次日预测、
+ * 综合评分、机构参与度）。这是 xxjwxc 独有的数据，东财/新浪没有对应接口。
+ *
+ * 资金动态窗口需要按分组渲染成卡片 → 用这个结构化版本；
+ * AI prompt 需要纯文本 → 用下面的 fetchStockAnalysis。
  */
-export async function fetchStockAnalysis(code: string): Promise<string> {
+export async function fetchStockAnalysisGroups(code: string): Promise<AnalysisGroup[]> {
   const payload = await xxjPost('/analy.analy_code', { code });
   const list = payload && payload.data && payload.data.list;
-  if (!Array.isArray(list)) return '';
+  if (!Array.isArray(list)) return [];
 
-  const lines: string[] = [];
+  const groups: AnalysisGroup[] = [];
   for (const group of list) {
     if (!group || typeof group.name !== 'string') continue;
-    const msgs = Array.isArray(group.msgs) ? group.msgs : [];
+    const msgs = Array.isArray(group.msgs)
+      ? group.msgs.filter((m: any) => typeof m === 'string' && m)
+      : [];
     if (!msgs.length) continue;
-    lines.push(`【${group.name}】${msgs.join('；')}`);
+    groups.push({ name: group.name, msgs });
   }
-  return lines.join('\n');
+  return groups;
+}
+
+/**
+ * 个股第三方分析结论的文本形式，便于直接拼进 AI prompt。
+ * 与 fetchStockAnalysisGroups 同源，只是把分组拍平成 `【组名】msg1；msg2`。
+ */
+export async function fetchStockAnalysis(code: string): Promise<string> {
+  const groups = await fetchStockAnalysisGroups(code);
+  if (!groups.length) return '';
+  return groups.map((g) => `【${g.name}】${g.msgs.join('；')}`).join('\n');
 }
 
 /**
@@ -244,6 +264,7 @@ export default {
   xxjPost,
   fetchStockMainFlow,
   fetchStockAnalysis,
+  fetchStockAnalysisGroups,
   parseHyTime,
   fetchIndustryFlow,
   fetchHeadlines,

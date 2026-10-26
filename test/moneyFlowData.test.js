@@ -20,6 +20,7 @@ Module._resolveFilename = function (request, ...args) {
 const axios = require('axios');
 const xxj = require('../out/shared/xxjwxcData');
 const em = require('../out/shared/emMoneyFlow');
+const tc = require('../out/shared/tencentStock');
 
 const originalPost = axios.post;
 const originalGet = axios.get;
@@ -198,6 +199,76 @@ describe('xxjwxc 个股分析结论 fetchStockAnalysis', () => {
   });
 });
 
+describe('xxjwxc 结构化分析分组 fetchStockAnalysisGroups', () => {
+  const LIST = {
+    list: [
+      { name: 'PEG估值', msgs: ['peg指标:-4.945', '行业对比:平均 2.074 | 中值 383.219'] },
+      { name: '综合评分(多维度)', msgs: ['综合:97.07(趋势:97.30)'] },
+      { name: '空分组', msgs: [] },
+      '脏数据行',
+    ],
+  };
+
+  it('按分组返回 {name, msgs[]} 结构，跳过空分组与脏行', async () => {
+    axios.post = async () => ok(LIST);
+    const groups = await xxj.fetchStockAnalysisGroups('sh600519');
+    assert.strictEqual(groups.length, 2, '空分组与非对象行不应出现');
+    assert.strictEqual(groups[0].name, 'PEG估值');
+    assert.deepStrictEqual(groups[0].msgs, ['peg指标:-4.945', '行业对比:平均 2.074 | 中值 383.219']);
+    assert.strictEqual(groups[1].name, '综合评分(多维度)');
+  });
+
+  it('失败时返回空数组', async () => {
+    axios.post = async () => {
+      throw timeoutError();
+    };
+    assert.deepStrictEqual(await xxj.fetchStockAnalysisGroups('sh600519'), []);
+  });
+
+  it('payload 无 list 时返回空数组', async () => {
+    axios.post = async () => ok({});
+    assert.deepStrictEqual(await xxj.fetchStockAnalysisGroups('sh600519'), []);
+  });
+});
+
+describe('腾讯批量股票名称 fetchStockNames / parseStockNames', () => {
+  const BODY =
+    'v_sh600519="1~贵州茅台~600519~1333.10~1335.00~...";\n' +
+    'v_sz000001="51~平安银行~000001~11.26~...";\n' +
+    'v_pv_none_match="1";\n';
+
+  it('解析批量行情文本为 代码→名称 映射', () => {
+    const names = tc.parseStockNames(BODY);
+    assert.strictEqual(names.sh600519, '贵州茅台');
+    assert.strictEqual(names.sz000001, '平安银行');
+    assert.strictEqual(Object.keys(names).length, 2, '无名称的 pv_none_match 行不应入表');
+  });
+
+  it('一次请求取回全部代码的名称', async () => {
+    axios.get = async () => ({ status: 200, data: BODY });
+    const names = await tc.fetchStockNames(['sh600519', 'sz000001']);
+    assert.strictEqual(names.sh600519, '贵州茅台');
+    assert.strictEqual(names.sz000001, '平安银行');
+  });
+
+  it('请求失败时返回空对象（名称缺失不能拖垮列表）', async () => {
+    axios.get = async () => {
+      throw timeoutError();
+    };
+    assert.deepStrictEqual(await tc.fetchStockNames(['sh600519']), {});
+  });
+
+  it('空代码列表不发请求', async () => {
+    let called = false;
+    axios.get = async () => {
+      called = true;
+      return { status: 200, data: BODY };
+    };
+    assert.deepStrictEqual(await tc.fetchStockNames([]), {});
+    assert.strictEqual(called, false);
+  });
+});
+
 describe('并发限流 mapLimit', () => {
   const { mapLimit } = require('../out/shared/utils');
 
@@ -333,20 +404,31 @@ describe('xxjwxc 个股信息 fetchStockQuote', () => {
 describe('资金动态多源编排 fundFlowData', () => {
   const flowModule = require('../out/shared/xxjwxcData');
   const emModule = require('../out/shared/emMoneyFlow');
+  const tcModule = require('../out/shared/tencentStock');
   const fund = require('../out/shared/fundFlowData');
   const orig = {
     fetchStockMainFlow: flowModule.fetchStockMainFlow,
     fetchIndustryFlow: flowModule.fetchIndustryFlow,
     fetchStockQuote: flowModule.fetchStockQuote,
     fetchStockAnalysis: flowModule.fetchStockAnalysis,
+    fetchStockAnalysisGroups: flowModule.fetchStockAnalysisGroups,
     fetchEastIndustryFlow: emModule.fetchEastIndustryFlow,
     fetchEastStockMainFlow: emModule.fetchEastStockMainFlow,
+    fetchStockNames: tcModule.fetchStockNames,
   };
   afterEach(() => {
-    Object.keys(orig).forEach((k) => {
-      flowModule[k] = orig[k];
-      emModule[k] = orig[k];
-    });
+    flowModule.fetchStockMainFlow = orig.fetchStockMainFlow;
+    flowModule.fetchIndustryFlow = orig.fetchIndustryFlow;
+    flowModule.fetchStockQuote = orig.fetchStockQuote;
+    flowModule.fetchStockAnalysis = orig.fetchStockAnalysis;
+    flowModule.fetchStockAnalysisGroups = orig.fetchStockAnalysisGroups;
+    emModule.fetchEastIndustryFlow = orig.fetchEastIndustryFlow;
+    emModule.fetchEastStockMainFlow = orig.fetchEastStockMainFlow;
+    tcModule.fetchStockNames = orig.fetchStockNames;
+  });
+  beforeEach(() => {
+    // 名称接口默认放行（避免旧用例打外网），需要断言的用例再覆盖
+    tcModule.fetchStockNames = async () => ({});
   });
 
   describe('loadStockFundRows（A：逐股当日主力净流入）', () => {
@@ -414,6 +496,30 @@ describe('资金动态多源编排 fundFlowData', () => {
       assert.deepStrictEqual(await fund.loadStockFundRows([]), []);
       assert.deepStrictEqual(await fund.loadStockFundRows(null), []);
     });
+
+    it('行内附带股票名称（腾讯批量接口一次取回）', async () => {
+      flowModule.fetchStockMainFlow = async () => ({ tm: 't', price: [1], main: [7] });
+      let requested = [];
+      tcModule.fetchStockNames = async (codes) => {
+        requested = codes;
+        return { sh600519: '贵州茅台', sz000001: '平安银行' };
+      };
+
+      const rows = await fund.loadStockFundRows(['sh600519', 'sz000001']);
+      assert.deepStrictEqual(requested.sort(), ['sh600519', 'sz000001'], '应批量请求全部 A 股代码');
+      assert.strictEqual(rows[0].name, '贵州茅台');
+      assert.strictEqual(rows[1].name, '平安银行');
+    });
+
+    it('名称接口失败时行保留且 name 为空串（不拖垮整个列表）', async () => {
+      flowModule.fetchStockMainFlow = async () => ({ tm: 't', price: [1], main: [7] });
+      tcModule.fetchStockNames = async () => ({});
+
+      const rows = await fund.loadStockFundRows(['sh600519']);
+      assert.strictEqual(rows.length, 1, '名称失败不能丢行');
+      assert.strictEqual(rows[0].name, '', '取不到名称时应为空串而非 undefined');
+      assert.strictEqual(rows[0].mainNet, 7, '资金流数据不受名称失败影响');
+    });
   });
 
   describe('loadIndustryRows（D：全行业资金流排名）', () => {
@@ -458,7 +564,9 @@ describe('资金动态多源编排 fundFlowData', () => {
         percent: 0.61,
         hy: [{ name: '贵州板块', percent: 0.54 }],
       });
-      flowModule.fetchStockAnalysis = async () => '【综合评分】96.01';
+      flowModule.fetchStockAnalysisGroups = async () => [
+        { name: '综合评分(多维度)', msgs: ['综合:96.01'] },
+      ];
 
       const d = await fund.loadStockDetail('sh600519');
       assert.strictEqual(d.code, 'sh600519');
@@ -467,7 +575,9 @@ describe('资金动态多源编排 fundFlowData', () => {
       assert.strictEqual(d.percent, 0.61, '涨跌幅应透传');
       assert.strictEqual(d.mainFlow.main.length, 2);
       assert.strictEqual(d.sectors.length, 1);
-      assert.ok(d.analysis.includes('96.01'));
+      assert.strictEqual(d.analysis.length, 1, '分析结论应为结构化分组数组');
+      assert.strictEqual(d.analysis[0].name, '综合评分(多维度)');
+      assert.deepStrictEqual(d.analysis[0].msgs, ['综合:96.01']);
     });
 
     it('任一子请求失败只丢该字段，其余照常返回', async () => {
@@ -475,13 +585,13 @@ describe('资金动态多源编排 fundFlowData', () => {
       flowModule.fetchStockQuote = async () => {
         throw new Error('boom');
       };
-      flowModule.fetchStockAnalysis = async () => '';
+      flowModule.fetchStockAnalysisGroups = async () => [];
 
       const d = await fund.loadStockDetail('sh600519');
       assert.strictEqual(d.code, 'sh600519');
       assert.strictEqual(d.mainFlow, null);
       assert.deepStrictEqual(d.sectors, []);
-      assert.strictEqual(d.analysis, '');
+      assert.deepStrictEqual(d.analysis, [], '分析失败应为空数组而非 undefined');
       assert.strictEqual(d.name, '', 'quote 失败时名称为空串而非 undefined');
       assert.strictEqual(d.price, 0, 'quote 失败时现价为 0 而非 undefined');
       assert.strictEqual(d.percent, 0);

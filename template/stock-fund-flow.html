@@ -123,11 +123,20 @@
         color: var(--vscode-list-activeSelectionForeground, #fff);
       }
       .stock-row .code {
-        font-family: var(--vscode-editor-font-family, monospace);
         font-size: 12px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .stock-row .code .nm {
+        font-weight: 600;
+        margin-right: 6px;
+      }
+      .stock-row .code .cid {
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 11px;
+        font-weight: 400;
+        color: var(--vscode-descriptionForeground, #999);
       }
       .stock-row .net {
         font-family: var(--vscode-editor-font-family, monospace);
@@ -244,14 +253,34 @@
         border-radius: 2px;
       }
 
-      /* 分析结论 */
-      .analysis {
-        padding: 8px 10px;
-        font-family: var(--vscode-editor-font-family, monospace);
+      /* 分析结论（按分组卡片渲染） */
+      .ana-group {
+        border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.15));
+        padding: 7px 10px;
+      }
+      .ana-group:last-child {
+        border-bottom: none;
+      }
+      .ana-title {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1;
+        padding: 3px 7px;
+        margin-bottom: 6px;
+        border-radius: 3px;
+        background: var(--vscode-badge-background, rgba(0, 122, 204, 0.4));
+        color: var(--vscode-badge-foreground, #fff);
+      }
+      .ana-msg {
         font-size: 12px;
         line-height: 1.7;
-        white-space: pre-wrap;
         word-break: break-word;
+        color: var(--vscode-editor-foreground, #ccc);
+      }
+      .ana-msg .k {
+        color: var(--vscode-descriptionForeground, #999);
+        margin-right: 4px;
       }
 
       .empty {
@@ -439,6 +468,10 @@
             var r = stockRows[i];
             var cls = signClass(r.mainNet);
             var active = r.code === selectedCode ? ' active' : '';
+            // 名称为主、代码为辅；名称缺失时只显示代码
+            var label = r.name
+              ? '<span class="nm">' + escapeHtml(r.name) + '</span><span class="cid">' + escapeHtml(r.code) + '</span>'
+              : '<span class="cid">' + escapeHtml(r.code) + '</span>';
             html +=
               '<div class="stock-row' +
               active +
@@ -446,7 +479,7 @@
               escapeHtml(r.code) +
               '">' +
               '<span class="code">' +
-              escapeHtml(r.code) +
+              label +
               '</span>' +
               '<span class="net ' +
               cls +
@@ -524,6 +557,46 @@
         }
 
         /* ================= 粒度 C + 分析 ================= */
+        /**
+         * 第三方量化分析（结构化分组 [{name, msgs[]}]）→ 卡片列表。
+         * 单条消息形如 "peg指标:-4.945"，冒号前的 key 用弱色区分层次。
+         */
+        function renderAnalysis(groups) {
+          var box = $('analysisBox');
+          if (!Array.isArray(groups) || !groups.length) {
+            box.innerHTML = '<div class="empty">暂无分析结论</div>';
+            return;
+          }
+
+          var html = '';
+          for (var i = 0; i < groups.length; i++) {
+            var g = groups[i] || {};
+            var msgs = Array.isArray(g.msgs) ? g.msgs : [];
+            html +=
+              '<div class="ana-group">' +
+              '<div class="ana-title">' +
+              escapeHtml(g.name || '') +
+              '</div>';
+            for (var j = 0; j < msgs.length; j++) {
+              var m = String(msgs[j] === null || msgs[j] === undefined ? '' : msgs[j]);
+              // 首个冒号（中英文皆可）前是 key，做弱色处理
+              var pos = m.search(/[:：]/);
+              if (pos > 0) {
+                html +=
+                  '<div class="ana-msg"><span class="k">' +
+                  escapeHtml(m.slice(0, pos) + ':') +
+                  '</span>' +
+                  escapeHtml(m.slice(pos + 1)) +
+                  '</div>';
+              } else {
+                html += '<div class="ana-msg">' + escapeHtml(m) + '</div>';
+              }
+            }
+            html += '</div>';
+          }
+          box.innerHTML = html;
+        }
+
         function renderDetail(d) {
           $('detailHead').style.display = 'flex';
           $('detailHint').textContent = '';
@@ -566,11 +639,8 @@
             secBox.innerHTML = sh;
           }
 
-          // 第三方分析
-          var anaBox = $('analysisBox');
-          anaBox.innerHTML = d.analysis
-            ? '<div class="analysis">' + escapeHtml(d.analysis) + '</div>'
-            : '<div class="empty">暂无分析结论</div>';
+          // 第三方分析：按分组渲染卡片（组名徽章 + 逐条消息）
+          renderAnalysis(d.analysis);
 
           // B：分时曲线
           currentFlow = flow;

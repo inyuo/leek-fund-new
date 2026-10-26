@@ -73,7 +73,7 @@ async function pushInit(panel: any, initialCode?: string): Promise<void> {
 async function pushDetail(panel: any, code: string): Promise<void> {
   const detail = await loadStockDetail(code).catch((e) => {
     console.error('[资金动态] 取个股详情失败', errMsg(e));
-    return { code, name: '', price: 0, percent: 0, mainFlow: null, analysis: '', sectors: [] };
+    return { code, name: '', price: 0, percent: 0, mainFlow: null, analysis: [], sectors: [] };
   });
 
   try {

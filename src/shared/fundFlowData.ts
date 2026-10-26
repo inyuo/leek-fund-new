@@ -11,12 +11,14 @@
  */
 import {
   fetchStockMainFlow,
-  fetchStockAnalysis,
+  fetchStockAnalysisGroups,
   fetchStockQuote,
   fetchIndustryFlow,
   MainFlowData,
+  AnalysisGroup,
 } from './xxjwxcData';
 import { fetchEastIndustryFlow, fetchEastStockMainFlow, toSecid } from './emMoneyFlow';
+import { fetchStockNames } from './tencentStock';
 import { mapLimit } from './utils';
 
 /** 逐股取数并发上限：第三方接口短时高并发会触发反爬（实测东财被封） */
@@ -34,6 +36,8 @@ function errMsg(e: any): string {
 /** 粒度 A：一只自选股的当日主力净流入 */
 export interface StockFundRow {
   code: string;
+  /** 股票名称（腾讯批量行情），取不到时为空串 */
+  name: string;
   /** 当日累计主力净流入（取分时序列末元素），两源皆无时为 null */
   mainNet: number | null;
   /** 数据日期（如 20261019），东财备源无日期时为空串 */
@@ -67,7 +71,8 @@ export interface StockDetail {
   /** 涨跌幅（%），取不到时为 0 */
   percent: number;
   mainFlow: MainFlowData | null;
-  analysis: string;
+  /** 第三方量化分析（结构化分组，供窗口按卡片渲染） */
+  analysis: AnalysisGroup[];
   sectors: SectorRow[];
 }
 
@@ -93,6 +98,9 @@ export function isAShareCode(code: any): boolean {
  *
  * 注：备源只在主源失败时生效，此时分时曲线（粒度 B）同样是空的，
  * 因此不会出现"列表一个值、点进去另一个值"的跨源矛盾。
+ *
+ * 股票名称走腾讯批量行情（一次请求拿全部），与逐股资金流并发；
+ * 名称失败只丢展示名，行与资金流数据照常返回。
  */
 export async function loadStockFundRows(codes: any): Promise<StockFundRow[]> {
   const list = (Array.isArray(codes) ? codes : [])
@@ -101,33 +109,47 @@ export async function loadStockFundRows(codes: any): Promise<StockFundRow[]> {
 
   if (list.length === 0) return [];
 
-  return mapLimit(list, STOCK_CONCURRENCY, async (code: string) => {
-    try {
-      const flow = await fetchStockMainFlow(code);
-      if (flow && flow.main.length > 0) {
-        return {
-          code,
-          mainNet: flow.main[flow.main.length - 1],
-          tm: flow.tm,
-          source: 'xxjwxc',
-        };
+  const pair = await Promise.all([
+    mapLimit(list, STOCK_CONCURRENCY, async (code: string): Promise<StockFundRow> => {
+      try {
+        const flow = await fetchStockMainFlow(code);
+        if (flow && flow.main.length > 0) {
+          return {
+            code,
+            name: '',
+            mainNet: flow.main[flow.main.length - 1],
+            tm: flow.tm,
+            source: 'xxjwxc',
+          };
+        }
+      } catch (e) {
+        console.error('[资金动态] 取个股资金流失败', code, errMsg(e));
       }
-    } catch (e) {
-      console.error('[资金动态] 取个股资金流失败', code, errMsg(e));
-    }
 
-    // 主源不可用 → 东财当日主力净流入兜底
-    try {
-      const east = await fetchEastStockMainFlow(code);
-      if (east !== null && east !== undefined && !isNaN(east)) {
-        return { code, mainNet: east, tm: '', source: 'east' };
+      // 主源不可用 → 东财当日主力净流入兜底
+      try {
+        const east = await fetchEastStockMainFlow(code);
+        if (east !== null && east !== undefined && !isNaN(east)) {
+          return { code, name: '', mainNet: east, tm: '', source: 'east' };
+        }
+      } catch (e) {
+        console.error('[资金动态] 东财个股资金流兜底失败', code, errMsg(e));
       }
-    } catch (e) {
-      console.error('[资金动态] 东财个股资金流兜底失败', code, errMsg(e));
-    }
 
-    return { code, mainNet: null, tm: '', source: '' };
-  });
+      return { code, name: '', mainNet: null, tm: '', source: '' };
+    }),
+    fetchStockNames(list).catch((e) => {
+      console.error('[资金动态] 批量取股票名称失败', errMsg(e));
+      return {} as { [code: string]: string };
+    }),
+  ]);
+
+  const rows = pair[0];
+  const names = pair[1] || {};
+  for (const row of rows) {
+    row.name = names[row.code] || '';
+  }
+  return rows;
 }
 
 /**
@@ -178,7 +200,7 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
     price: 0,
     percent: 0,
     mainFlow: null,
-    analysis: '',
+    analysis: [],
     sectors: [],
   };
 
@@ -193,9 +215,9 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
       console.error('[资金动态] 取个股信息失败', errMsg(e));
       return null;
     }),
-    fetchStockAnalysis(safeCode).catch((e) => {
+    fetchStockAnalysisGroups(safeCode).catch((e) => {
       console.error('[资金动态] 取分析结论失败', errMsg(e));
-      return '';
+      return [];
     }),
   ]);
   const flow = pair[0];
@@ -215,7 +237,7 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
     price: quote ? Number(quote.price) || 0 : 0,
     percent: quote ? Number(quote.percent) || 0 : 0,
     mainFlow: flow,
-    analysis: analysis || '',
+    analysis: Array.isArray(analysis) ? analysis : [],
     sectors,
   };
 }

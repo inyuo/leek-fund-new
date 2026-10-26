@@ -93,3 +93,40 @@
   递增链/跨小时位数/semver），全量 **90 passing**。
   产物 `investment-monitor-1.0.20261019170500.vsix`（3221 files / 6.37MB），
   包内 `extension/package.json` 的 version 已确认为带日期的值。
+
+## 窗口显示优化（2026-10-26，用户提出的两项）
+
+- [x] **1. 左侧自选股显示股票名称**
+  根因：`StockFundRow` 只有 `code/mainNet/tm/source`，后端从未取过名称，
+  前端只能渲染代码 `sh600519`。
+  方案（实测对比后选定）：**腾讯批量行情** `qt.gtimg.cn/q=sh600519,sz000001,...`
+  一次请求拿全部名称（30 只约 15KB，GBK 编码，复用 `iconv-lite` 解码模式）；
+  否决的备选「复用自选股树行情缓存」——0 请求但依赖树已加载，刚启动时拿不到，
+  且让 webview 层依赖 explorer 层。
+  实测细节：`r_` 精简前缀对 A 股返回 `pv_none_match`（不可用），
+  必须用原始代码前缀；无效代码行无名称段，`parseStockNames` 不入表。
+  实现：`tencentStock.ts` 新增 `parseStockNames`（纯函数，可单测）+
+  `fetchStockNames`（失败返回 `{}` 不抛错）；`loadStockFundRows` 里
+  名称与逐股资金流**并发**，名称失败只丢展示名、行与资金流照常返回。
+  渲染：名称为主（加粗）+ 代码为辅（弱色小字），名称缺失回退只显示代码。
+- [x] **2. 第三方量化分析区显示优化**
+  根因：接口原始数据本是结构化分组（实测茅台 5 组：PEG估值/技术指标分析/
+  预测与评价/综合评分/特色数据），但 `fetchStockAnalysis` 拍平成
+  `【组名】msg1；msg2` 纯文本整块 `pre-wrap` 渲染，无层次。
+  实现：新增 `fetchStockAnalysisGroups` 返回 `{name, msgs[]}[]` 结构化分组；
+  `fetchStockAnalysis` 改为其文本投影（**AI prompt 两个消费方零改动**，
+  附录格式与原来完全一致）；`StockDetail.analysis` 类型从 `string` 改为
+  `AnalysisGroup[]`。
+  渲染：分组卡片 = 组名徽章（badge 色）+ 组内逐条消息，
+  消息里首个冒号（中英文皆可）前的 key 用弱色区分层次。
+- [x] **3. 模板行为测试基座**：新增 `test/helpers/webview-dom.js`（伪 DOM，
+  在 Node vm 里执行模板内联 script，不引 jsdom）+ `test/stockFundFlowView.test.js`
+  4 用例（名称渲染/名称缺失回退/分组卡片/空态）。
+- [x] TDD：先红后绿，RED **14 failing**（结构化分组 3 + 腾讯名称 4 +
+  编排层 4 + 模板渲染 3）→ GREEN 全绿。
+  验证：`tsc` 0 error / `eslint` 0 error 5 warning（基线）/
+  **103 passing**（原 90 + 新增 13）。
+- [x] 端到端真实接口验证（不 mock）：腾讯名称 4 只全对、
+  列表 3 只 A 股带名称（hk00700 正确过滤）、分析 5 分组结构化、
+  `fetchStockAnalysis` 文本首行与原来一致、详情 `analysis=array/5`、
+  名称接口失败降级 `name:""` 且资金流数据不受影响。
