@@ -223,6 +223,21 @@ describe('QuantProvider（store + mock fetchers 注入）', () => {
     assert.strictEqual(calls.dark, 2, '刷新命令应清缓存重新拉取');
   });
 
+  it('checkSession 5min TTL：重绘不重复校验，TTL 过后重新校验', async () => {
+    const store = memStore();
+    ljgx.saveSession(store, sampleSession());
+    const { provider, calls } = makeProvider(store, { dark: true, check: true });
+
+    await provider.getChildren();
+    await provider.getChildren();
+    assert.strictEqual(calls.check, 1, 'TTL 内两次 getChildren 重绘只应校验一次会话');
+
+    // 模拟 TTL 过期（JS 测试可直接改内部时间戳：sessionCheckTime 为普通实例属性）
+    provider.sessionCheckTime = 0;
+    await provider.getChildren();
+    assert.strictEqual(calls.check, 2, 'TTL 过期后应重新发起会话校验');
+  });
+
   it('无会话 → getChildren = [login, panel(north), panel(index)]', async () => {
     const store = memStore();
     const { provider, calls } = makeProvider(store, { dark: true, check: true });

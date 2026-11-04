@@ -26,13 +26,14 @@ import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
 import { NewsProvider } from './explorer/newsProvider';
-import { QuantProvider } from './explorer/quantProvider';
+import { QuantProvider, registerQuantProviderForRefresh } from './explorer/quantProvider';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
 import globalState from './globalState';
 import FlashNewsOutputServer from './output/flash-news/FlashNewsOutputServer';
 import { LeekFundConfig } from './shared/leekConfig';
 import { LeekTreeItem } from './shared/leekTreeItem';
+import { createVscodeStorage } from './shared/ljgxData';
 // import checkForUpdate from './shared/update';
 import { colorOptionList, randomColor } from './shared/utils';
 import allFundTrend from './webview/allFundTrend';
@@ -956,10 +957,15 @@ export function registerViewEvent(
  * - 启动时静默校验会话 + 预热榜单（不 await，完成后自动重绘）。
  */
 export function registerQuant(context: ExtensionContext, quantProvider: QuantProvider) {
+  // Task 6：记录 provider 引用，登录面板登录成功后回调 refreshQuantTree() 重绘
+  registerQuantProviderForRefresh(quantProvider);
+
   context.subscriptions.push(
     commands.registerCommand('leek-fund.quantLogin', () => {
-      /* Task 6 接入：const { quantLogin } = require('./webview/quantLogin'); */
-      console.info('[LJGX] 微信扫码登录面板将在后续版本提供');
+      /* Task 6 接入：懒加载登录面板；存储引用在命令内注入（与 Task 5 扩展侧同源） */
+      const { initQuantLogin, quantLogin } = require('./webview/quantLogin');
+      initQuantLogin(createVscodeStorage(context.globalState));
+      quantLogin();
     })
   );
   context.subscriptions.push(

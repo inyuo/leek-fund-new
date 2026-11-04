@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>微信扫码登录</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--vscode-editor-background, #1e1e1e);
+        color: var(--vscode-editor-foreground, #cccccc);
+        font-family: var(--vscode-font-family, system-ui, 'Microsoft YaHei', sans-serif);
+        font-size: 13px;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: auto;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        width: 320px;
+        padding: 24px 20px;
+        border: 1px solid var(--vscode-panel-border, #444);
+        border-radius: 8px;
+        background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.05));
+        text-align: center;
+      }
+      .card h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .status {
+        min-height: 18px;
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+      }
+      .status.error {
+        color: var(--vscode-errorForeground, #f48771);
+      }
+
+      .qr-box,
+      .success-box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .qr-frame {
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid var(--vscode-panel-border, #444);
+        background: #ffffff;
+      }
+      #qrImg {
+        display: block;
+        width: 200px;
+        height: 200px;
+      }
+
+      .hint {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .btn {
+        cursor: pointer;
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-secondaryBackground, #3a3d41);
+        color: var(--vscode-button-secondaryForeground, #fff);
+        border-radius: 3px;
+        padding: 4px 12px;
+        font-size: 12px;
+      }
+      .btn:hover {
+        background: var(--vscode-button-secondaryHoverBackground, #45494e);
+      }
+
+      .avatar {
+        display: block;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 1px solid var(--vscode-panel-border, #444);
+      }
+      .nick {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .expire {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+      }
+      .done-hint {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>微信扫码登录</h1>
+
+      <!-- 状态文案：未收到任何消息时即占位提示 -->
+      <div id="status" class="status">正在获取登录二维码，请稍候…</div>
+
+      <!-- 扫码区：SSE 首帧给出二维码 url 后显示 -->
+      <div id="qrBox" class="qr-box">
+        <div class="qr-frame">
+          <img id="qrImg" alt="微信登录二维码" />
+        </div>
+        <div id="hint" class="hint">微信扫一扫 → 手机确认 → 自动登录</div>
+        <button id="retryBtn" class="btn">二维码过期？点击刷新</button>
+      </div>
+
+      <!-- 成功态 / 已登录态：头像 + 昵称 + 有效期 -->
+      <div id="successBox" class="success-box">
+        <img id="avatar" class="avatar" alt="微信头像" />
+        <div id="nick" class="nick"></div>
+        <div id="expire" class="expire"></div>
+        <div class="done-hint">登录成功，可关闭此窗口使用掘金功能</div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var vscode = acquireVsCodeApi();
+
+        /** 未收到任何消息 / 仅 did 载荷时的占位提示（SSE 首帧未到，二维码图未下载） */
+        var IDLE_TEXT = '正在获取登录二维码，请稍候…';
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        function setStatus(text, isError) {
+          var el = $('status');
+          el.textContent = text || '';
+          el.className = 'status' + (isError ? ' error' : '');
+        }
+
+        function pad2(n) {
+          return n < 10 ? '0' + n : String(n);
+        }
+
+        /** overdueTime（unix 秒）→ `登录有效期至 yyyy-MM-dd HH:mm`；非法值给未知提示 */
+        function formatExpire(overdueTime) {
+          if (typeof overdueTime === 'number' && overdueTime > 0) {
+            var d = new Date(overdueTime * 1000);
+            if (!isNaN(d.getTime())) {
+              return (
+                '登录有效期至 ' +
+                d.getFullYear() +
+                '-' +
+                pad2(d.getMonth() + 1) +
+                '-' +
+                pad2(d.getDate()) +
+                ' ' +
+                pad2(d.getHours()) +
+                ':' +
+                pad2(d.getMinutes())
+              );
+            }
+          }
+          return '登录有效期：未知';
+        }
+
+        /** qrcode 消息：url 为二维码图直链；只有 did 时保持准备中占位 */
+        function showQrcode(data) {
+          $('successBox').style.display = 'none';
+          $('qrBox').style.display = 'flex';
+
+          var img = $('qrImg');
+          if (data && data.url) {
+            img.src = data.url;
+            img.style.display = 'block';
+            setStatus('请使用微信扫描上方二维码登录');
+          } else {
+            img.src = '';
+            img.style.display = 'none';
+            setStatus(IDLE_TEXT);
+          }
+        }
+
+        /** success / session 消息：头像 + 昵称 + 有效期 */
+        function showSuccess(data) {
+          data = data || {};
+          $('qrBox').style.display = 'none';
+          $('successBox').style.display = 'flex';
+
+          var avatar = $('avatar');
+          if (data.avatarUrl) {
+            avatar.src = data.avatarUrl;
+            avatar.style.display = 'block';
+          } else {
+            avatar.src = '';
+            avatar.style.display = 'none';
+          }
+          $('nick').textContent = data.userName || '已登录';
+          $('expire').textContent = formatExpire(data.overdueTime);
+          setStatus('登录成功');
+        }
+
+        window.addEventListener('message', function (event) {
+          var msg = event.data;
+          if (!msg || !msg.type) return;
+
+          if (msg.type === 'qrcode') {
+            showQrcode(msg.data);
+          } else if (msg.type === 'success' || msg.type === 'session') {
+            showSuccess(msg.data);
+          } else if (msg.type === 'error') {
+            setStatus(String(msg.data || '登录组件异常'), true);
+          }
+        });
+
+        $('retryBtn').addEventListener('click', function () {
+          $('qrImg').style.display = 'none';
+          setStatus('正在刷新二维码…');
+          vscode.postMessage({ command: 'cancel' });
+        });
+
+        // 初始占位：未收到任何消息前隐藏扫码区与登录态、显示准备提示
+        $('qrBox').style.display = 'none';
+        $('successBox').style.display = 'none';
+        setStatus(IDLE_TEXT);
+        vscode.postMessage({ command: 'ready' });
+      })();
+    </script>
+  </body>
+</html>

@@ -153,6 +153,26 @@ function formatExpireTooltip(overdueTime: number): string {
   return '登录有效期：未知';
 }
 
+/* ---------- 登录面板 → 树刷新钩子（Task 6） ---------- */
+
+/** registerQuant 注册的 provider 引用；登录面板登录成功后经此回调 refresh */
+let refreshTarget: { refresh(): void } | null = null;
+
+/** 注册 provider 引用（registerQuant 在命令注册时调用） */
+export function registerQuantProviderForRefresh(provider: { refresh(): void }): void {
+  refreshTarget = provider;
+}
+
+/** 登录面板内部使用：触发侧边栏「掘金」树重绘（未注册时静默跳过） */
+export function refreshQuantTree(): void {
+  if (!refreshTarget) return;
+  try {
+    refreshTarget.refresh();
+  } catch (e) {
+    console.error('[LJGX] 刷新掘金树失败', errMsg(e));
+  }
+}
+
 /* ---------- TreeItem / Provider（VS Code 层） ---------- */
 
 export class QuantTreeItem extends TreeItem {
@@ -179,6 +199,9 @@ export class QuantTreeItem extends TreeItem {
 /** 暗盘榜单缓存 TTL（当日 + 30 分钟，跨天失效） */
 const DARK_TTL_MS = 30 * 60 * 1000;
 
+/** 会话校验（re_login POST）TTL：getChildren 每次重绘都会走 computeState，不能每次都发请求 */
+const SESSION_CHECK_TTL_MS = 5 * 60 * 1000;
+
 export interface QuantProviderDeps {
   /** 生产端传 createVscodeStorage(context.globalState)；测试传内存实现 */
   store: LjgxStorage;
@@ -199,6 +222,7 @@ export class QuantProvider implements TreeDataProvider<QuantTreeItem> {
   /** 缓存状态：session + checkSession 结果、榜单（当日 + 30min TTL） */
   private session: LjgxSession | null = null;
   private sessionValid = false;
+  private sessionCheckTime = 0; // 最近一次 checkSession 时间（成功/失败都刷新）
   private darkBuy: { title: string; list: DarkBuyItem[] } | null = null;
   private darkBuyFailed = false;
   private darkBuyTime = 0;
@@ -276,21 +300,31 @@ export class QuantProvider implements TreeDataProvider<QuantTreeItem> {
       return;
     }
 
-    // 静默校验登录态（网络失败时 checkSession 保留会话原样返回，不清库）
-    const checked = await this.doCheckSession(this.store);
-    this.session = checked;
-    if (!checked) {
-      // 会话过期（re_login relogin:true 已被 checkSession 清库）→ 未登录态
-      this.sessionValid = false;
-      this.darkBuy = null;
-      this.darkBuyFailed = false;
-      this.darkBuyTime = 0;
-      return;
+    // 静默校验登录态（网络失败时 checkSession 保留会话原样返回，不清库）；
+    // 5min TTL 内直接沿用上次校验结果，避免 getChildren 重绘频繁打 re_login
+    const now = Date.now();
+    if (
+      this.sessionValid &&
+      this.session &&
+      now - this.sessionCheckTime < SESSION_CHECK_TTL_MS
+    ) {
+      // TTL 内：沿用缓存会话
+    } else {
+      const checked = await this.doCheckSession(this.store);
+      this.session = checked;
+      this.sessionCheckTime = now; // 成功/失败（过期清库、网络降级）都刷新
+      if (!checked) {
+        // 会话过期（re_login relogin:true 已被 checkSession 清库）→ 未登录态
+        this.sessionValid = false;
+        this.darkBuy = null;
+        this.darkBuyFailed = false;
+        this.darkBuyTime = 0;
+        return;
+      }
     }
     this.sessionValid = true;
 
-    // 榜单缓存：当日 + 30 分钟 TTL
-    const now = Date.now();
+    // 榜单缓存：当日 + 30 分钟 TTL（复用上方 now）
     if (
       this.darkBuy &&
       this.darkBuyTime > 0 &&
@@ -319,4 +353,11 @@ function isSameDay(a: number, b: number): boolean {
     d1.getMonth() === d2.getMonth() &&
     d1.getDate() === d2.getDate()
   );
+}
+
+/** 日志只取 message：避免错误对象（含完整 config/request）刷屏 */
+function errMsg(e: any): string {
+  if (!e) return String(e);
+  if (typeof e === 'string') return e;
+  return e.message || e.code || String(e);
 }
