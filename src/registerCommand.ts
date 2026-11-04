@@ -26,6 +26,7 @@ import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
 import { NewsProvider } from './explorer/newsProvider';
+import { QuantProvider } from './explorer/quantProvider';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
 import globalState from './globalState';
@@ -945,6 +946,36 @@ export function registerViewEvent(
     })
   );
   // checkForUpdate();
+}
+
+/**
+ * 量价掘金（量化面板）命令注册：
+ * - quantLogin / quantOpen 面板 webview 由 Task 6/7 接入（require 懒加载形式），
+ *   本任务先注册占位实现，保证点击有行为与提示；
+ * - refreshQuant 清 provider 榜单缓存重新拉取；
+ * - 启动时静默校验会话 + 预热榜单（不 await，完成后自动重绘）。
+ */
+export function registerQuant(context: ExtensionContext, quantProvider: QuantProvider) {
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.quantLogin', () => {
+      /* Task 6 接入：const { quantLogin } = require('./webview/quantLogin'); */
+      console.info('[LJGX] 微信扫码登录面板将在后续版本提供');
+    })
+  );
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.quantOpen', (target) => {
+      /* Task 6/7 接入：const { quantPanel } = require('./webview/quantPanel'); */
+      const tab = (target && target.tab) || 'north';
+      console.info(`[LJGX] 量化面板（${tab}）将在后续版本提供`);
+    })
+  );
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.refreshQuant', () => {
+      quantProvider.refreshData();
+    })
+  );
+
+  quantProvider.preload();
 }
 
 export function registerCommandPaletteEvent(context: ExtensionContext, statusbar: StatusBar) {

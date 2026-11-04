@@ -39,6 +39,7 @@
     "onView:leekFundView.news",
     "onView:leekFundView.binance",
     "onView:leekFundView.forex",
+    "onView:leekFundView.quant",
     "onView:leekFundView.settings",
     "onCommand:leek-fund.toggleStatusBarIconVisibility"
   ],
@@ -76,6 +77,10 @@
           "id": "leekFundView.forex",
           "name": "Forex",
           "visibility": "hidden"
+        },
+        {
+          "id": "leekFundView.quant",
+          "name": "掘金"
         },
         {
           "id": "leekFundView.settings",
@@ -336,6 +341,19 @@
         "command": "leek-fund.stockWindVane",
         "title": "选股风向标",
         "icon": "$(graph)"
+      },
+      {
+        "command": "leek-fund.quantLogin",
+        "title": "量价掘金: 微信扫码登录"
+      },
+      {
+        "command": "leek-fund.quantOpen",
+        "title": "量价掘金: 打开量化面板"
+      },
+      {
+        "command": "leek-fund.refreshQuant",
+        "title": "量价掘金: 刷新数据",
+        "icon": "$(refresh)"
       }
     ],
     "keybindings": [
@@ -440,6 +458,11 @@
         {
           "command": "leek-fund.refreshForex",
           "when": "view == leekFundView.forex",
+          "group": "navigation"
+        },
+        {
+          "command": "leek-fund.refreshQuant",
+          "when": "view == leekFundView.quant",
           "group": "navigation"
         }
       ],

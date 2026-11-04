@@ -12,18 +12,20 @@ import { ForexService } from './explorer/forexService';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
 import { NewsProvider } from './explorer/newsProvider';
+import { QuantProvider } from './explorer/quantProvider';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
 import globalState from './globalState';
 import FlashNewsDaemon from './output/flash-news/FlashNewsDaemon';
 import FlashNewsOutputServer from './output/flash-news/FlashNewsOutputServer';
-import { registerCommandPaletteEvent, registerViewEvent } from './registerCommand';
+import { registerCommandPaletteEvent, registerQuant, registerViewEvent } from './registerCommand';
 import { HolidayHelper } from './shared/holidayHelper';
 import { LeekFundConfig } from './shared/leekConfig';
 import Log from './shared/log';
 import { Telemetry } from './shared/telemetry';
 import { SortType } from './shared/typed';
 import { events, formatDate, isStockTime } from './shared/utils';
+import { createVscodeStorage } from './shared/ljgxData';
 import { ProfitStatusBar } from './statusbar/Profit';
 import { StatusBar } from './statusbar/statusBar';
 import { cacheStocksRemindData } from './webview/leekCenterView';
@@ -41,6 +43,7 @@ let stockTreeView: TreeView<any> | null = null;
 let newsTreeView: TreeView<any> | null = null;
 let forexTreeView: TreeView<any> | null = null;
 let binanceTreeView: TreeView<any> | null = null;
+let quantTreeView: TreeView<any> | null = null;
 
 let flashNewsOutputServer: FlashNewsOutputServer | null = null;
 let profitBar: ProfitStatusBar | null = null;
@@ -82,6 +85,9 @@ export async function activate(context: ExtensionContext) {
   const binanceProvider = new BinanceProvider(binanceService);
   const forexProvider = new ForexProvider(forexService);
   const newsProvider = new NewsProvider();
+  const quantProvider = new QuantProvider({
+    store: createVscodeStorage(context.globalState),
+  });
 
   const statusBar = new StatusBar(stockService, fundService);
   profitBar = new ProfitStatusBar();
@@ -106,6 +112,11 @@ export async function activate(context: ExtensionContext) {
   newsTreeView = window.createTreeView('leekFundView.news', {
     treeDataProvider: newsProvider,
   });
+
+  quantTreeView = window.createTreeView('leekFundView.quant', {
+    treeDataProvider: quantProvider,
+  });
+  context.subscriptions.push(quantTreeView);
 
   // fix when TreeView collapse https://github.com/giscafer/leek-fund/issues/31
   const manualRequest = () => {
@@ -232,6 +243,9 @@ export async function activate(context: ExtensionContext) {
 
   // register command
   registerCommandPaletteEvent(context, statusBar);
+
+  // 量价掘金命令（登录/面板 Task 6 接入）+ 启动静默校验会话
+  registerQuant(context, quantProvider);
 
   // start local proxy server
   try {

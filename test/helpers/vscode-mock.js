@@ -8,6 +8,9 @@ class TreeItem {
   }
 }
 
+/** 与 vscode TreeItemCollapsibleState 同形（None=0, Collapsed=1, Expanded=2） */
+const TreeItemCollapsibleState = { None: 0, Collapsed: 1, Expanded: 2 };
+
 class EventEmitter {
   constructor() {
     this._listeners = [];
@@ -41,4 +44,4 @@ class Uri {
   }
 }
 
-module.exports = { TreeItem, EventEmitter, ThemeIcon, Uri };
+module.exports = { TreeItem, EventEmitter, ThemeIcon, Uri, TreeItemCollapsibleState };
