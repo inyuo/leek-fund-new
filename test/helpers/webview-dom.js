@@ -10,6 +10,46 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+const CTX_METHODS = [
+  'setTransform',
+  'clearRect',
+  'beginPath',
+  'moveTo',
+  'lineTo',
+  'stroke',
+  'fill',
+  'fillRect',
+  'fillText',
+  'strokeRect',
+  'save',
+  'restore',
+  'clip',
+  'rect',
+  'closePath',
+  'arc',
+  'ellipse',
+  'setLineDash',
+  'translate',
+  'scale',
+  'rotate',
+];
+
+/**
+ * canvas 2d 上下文桩：记录每一次绘制指令（方法名 + 参数），
+ * 图形不真渲染，测试按指令计数/序列断言「画了什么、画了几笔」。
+ * 属性（fillStyle/font 等）直接透传赋值，无需显式声明。
+ */
+function makeCtx2d() {
+  const ctx = {};
+  ctx.calls = [];
+  for (const name of CTX_METHODS) {
+    ctx[name] = function (...args) {
+      ctx.calls.push({ name, args });
+    };
+  }
+  return ctx;
+}
+
 /** 一个可被模板脚本读写的元素桩 */
 function makeElement(id) {
   return {
@@ -35,6 +75,13 @@ function makeElement(id) {
     },
     getBoundingClientRect() {
       return { width: 800, height: 300, left: 0, top: 0 };
+    },
+    // canvas：同一个元素重复 getContext 返回同一桩（真实规范语义）
+    _ctx: null,
+    getContext(type) {
+      if (type !== '2d') return null;
+      if (!this._ctx) this._ctx = makeCtx2d();
+      return this._ctx;
     },
   };
 }
@@ -103,4 +150,4 @@ function loadTemplate(templateName) {
   };
 }
 
-module.exports = { loadTemplate, makeElement };
+module.exports = { loadTemplate, makeElement, makeCtx2d };

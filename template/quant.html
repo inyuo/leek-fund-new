@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>量价掘金</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--vscode-editor-background, #1e1e1e);
+        color: var(--vscode-editor-foreground, #cccccc);
+        font-family: var(--vscode-font-family, system-ui, 'Microsoft YaHei', sans-serif);
+        font-size: 13px;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      /* ---------- 顶栏 ---------- */
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
+        background: var(--vscode-sideBar-background, transparent);
+        flex: 0 0 auto;
+      }
+      .topbar h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .topbar .meta {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+      }
+      .topbar .spacer {
+        flex: 1;
+      }
+      .status {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground, #999);
+      }
+      .status.error {
+        color: var(--vscode-charts-red, #f14c4c);
+      }
+      .btn {
+        cursor: pointer;
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-background, #0e639c);
+        color: var(--vscode-button-foreground, #fff);
+        border-radius: 3px;
+        padding: 4px 12px;
+        font-size: 12px;
+      }
+      .btn:hover {
+        background: var(--vscode-button-hoverBackground, #1177bb);
+      }
+
+      /* ---------- Tab 栏 ---------- */
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 6px 12px 0;
+        flex: 0 0 auto;
+      }
+      .tab {
+        cursor: pointer;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--vscode-descriptionForeground, #999);
+        padding: 5px 14px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      .tab.active {
+        color: var(--vscode-editor-foreground, #cccccc);
+        border-bottom-color: var(--vscode-focusBorder, #007acc);
+      }
+
+      /* ---------- 画布与占位 ---------- */
+      .chart-wrap {
+        flex: 1 1 auto;
+        padding: 6px 10px;
+        min-height: 0;
+        display: none;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .empty {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 12px;
+        line-height: 1.9;
+        white-space: pre-line;
+        cursor: default;
+      }
+      .empty.retriable {
+        cursor: pointer;
+      }
+      .empty.retriable:hover {
+        color: var(--vscode-editor-foreground, #ccc);
+      }
+      .guide .btn {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <h1>量价掘金</h1>
+      <span class="meta" id="updatedAt"></span>
+      <span class="status" id="status"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="refreshBtn">刷新</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab" id="tabCjl" data-tab="cjl">量价分层</button>
+      <button class="tab" id="tabNorth" data-tab="north">北向资金</button>
+      <button class="tab" id="tabIndex" data-tab="index">大盘指数</button>
+    </div>
+
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="chart"></canvas>
+    </div>
+    <div id="chartEmpty" class="empty" style="display: none">数据加载中…</div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var vscode = acquireVsCodeApi();
+
+        /** 当前 tab（首帧 init 的 data.tab 决定，懒加载：宿主只推当前 tab 数据） */
+        var currentTab = 'north';
+        /**
+         * 各 tab 数据缓存：undefined = 未拉取（切换后推 null，null = 拉取失败/空），
+         * 有值 = 已拉取对象。仅更新本次 init 对应 tab，其他 tab 缓存保留。
+         */
+        var cache = { cjl: undefined, north: undefined, index: undefined };
+        /** 量价分层 tab 是否未登录（宿主随 cjl 推送下发，引导复用 quantLogin 面板） */
+        var cjlUnlogged = false;
+
+        var PAL_VARS = [
+          ['--vscode-charts-red', '#f14c4c'],
+          ['--vscode-charts-green', '#4ec9b0'],
+          ['--vscode-charts-line', '#75beff'],
+          ['', '#cca700'],
+          ['', '#b180d7'],
+        ];
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        /** 读取 VS Code 主题色，canvas 需要显式取值（查 CSS 变量，元素无关） */
+        function cssVar(name, fallback) {
+          var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+          return v && v.trim() ? v.trim() : fallback;
+        }
+
+        function themeColor(name, fallback) {
+          return cssVar(name, fallback);
+        }
+
+        function palette(i) {
+          var pick = PAL_VARS[i % PAL_VARS.length];
+          return pick[0] ? themeColor(pick[0], pick[1]) : pick[1];
+        }
+
+        function setStatus(text, isError) {
+          var el = $('status');
+          el.textContent = text || '';
+          el.className = 'status' + (isError ? ' error' : '');
+        }
+
+        function updateTabs() {
+          var keys = ['cjl', 'north', 'index'];
+          var ids = ['tabCjl', 'tabNorth', 'tabIndex'];
+          for (var i = 0; i < keys.length; i++) {
+            $(ids[i]).className = 'tab' + (keys[i] === currentTab ? ' active' : '');
+          }
+        }
+
+        /* ================= canvas 公共 ================= */
+        function withCanvas(draw) {
+          var canvas = $('chart');
+          var wrap = $('chartWrap');
+          if (!canvas || !wrap) return;
+
+          var rect = wrap.getBoundingClientRect();
+          var w = rect.width;
+          var h = rect.height;
+          if (!(w > 0) || !(h > 0)) return;
+
+          var dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          var ctx = canvas.getContext('2d');
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          draw(ctx, w, h);
+        }
+
+        /** 数轴范围：合并多条序列的 min/max，相等时 ±1 防退化 */
+        function rangeOf(series) {
+          var min = Infinity;
+          var max = -Infinity;
+          for (var i = 0; i < series.length; i++) {
+            var arr = series[i];
+            for (var j = 0; j < arr.length; j++) {
+              if (arr[j] < min) min = arr[j];
+              if (arr[j] > max) max = arr[j];
+            }
+          }
+          if (min === Infinity) {
+            min = 0;
+            max = 1;
+          }
+          if (min === max) {
+            min -= 1;
+            max += 1;
+          }
+          var pad = (max - min) * 0.08;
+          return { min: min - pad, max: max + pad };
+        }
+
+        /* ================= Tab 1：量价分层（横向柱状分布） ================= */
+        /** get_share_cjl 的 price 为分层累计数组（升序），语义是各档位成本/持仓分布 */
+        function drawCjl(data) {
+          withCanvas(function (ctx, w, h) {
+            var price = (data && data.price) || [];
+            var rows = [];
+            for (var i = 0; i < price.length; i++) {
+              // price 元素可能为 null：跳过该档位
+              if (typeof price[i] === 'number' && isFinite(price[i])) {
+                rows.push(price[i]);
+              }
+            }
+            if (!rows.length) return;
+
+            var padL = 56;
+            var padR = 56;
+            var padT = 22;
+            var padB = 10;
+            var plotW = w - padL - padR;
+            var plotH = h - padT - padB;
+            if (plotW <= 0 || plotH <= 0) return;
+
+            var fg = cssVar('--vscode-descriptionForeground', '#9d9d9d');
+            var maxAbs = 0;
+            for (var r = 0; r < rows.length; r++) {
+              maxAbs = Math.max(maxAbs, Math.abs(rows[r]));
+            }
+            if (maxAbs <= 0) maxAbs = 1;
+
+            var rowH = plotH / rows.length;
+            var tm = data && data.tm ? data.tm : '';
+
+            ctx.fillStyle = fg;
+            ctx.font = '11px ' + cssVar('--vscode-editor-font-family', 'monospace');
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText('分层累计分布（升序）' + (tm ? ' · ' + tm : ''), padL, 4);
+
+            ctx.font = '10px ' + cssVar('--vscode-editor-font-family', 'monospace');
+            for (var j = 0; j < rows.length; j++) {
+              var v = rows[j];
+              var len = Math.max(2, (Math.abs(v) / maxAbs) * plotW);
+              var y = padT + j * rowH + Math.min(4, rowH * 0.2);
+              var barH = Math.max(6, rowH - Math.min(8, rowH * 0.4));
+              ctx.fillStyle = palette(j);
+              ctx.fillRect(padL, y, len, barH);
+              // 档位标号 + 数值
+              ctx.fillStyle = fg;
+              ctx.textBaseline = 'middle';
+              ctx.textAlign = 'right';
+              ctx.fillText('L' + (j + 1), padL - 6, y + barH / 2);
+              ctx.textAlign = 'left';
+              ctx.fillText(Number(v).toFixed(2), padL + len + 6, y + barH / 2);
+            }
+          });
+        }
+
+        /* ================= Tab 2：北向资金（双折线） ================= */
+        function drawNorth(data) {
+          withCanvas(function (ctx, w, h) {
+            var times = (data && data.times) || [];
+            var hgt = (data && data.hgtNet) || [];
+            var szt = (data && data.szgtNet) || [];
+            var n = Math.min(times.length, hgt.length, szt.length);
+            if (!n) return;
+
+            var padL = 52;
+            var padR = 20;
+            var padT = 24;
+            var padB = 22;
+            var plotW = w - padL - padR;
+            var plotH = h - padT - padB;
+            if (plotW <= 0 || plotH <= 0) return;
+
+            var fg = cssVar('--vscode-descriptionForeground', '#9d9d9d');
+            var grid = cssVar('--vscode-editorWidget-border', 'rgba(128,128,128,.25)');
+            var hgtColor = palette(0);
+            var sztColor = palette(1);
+
+            var rng = rangeOf([hgt, szt]);
+            var xOf = function (i) {
+              return padL + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+            };
+            var yOf = function (v) {
+              return padT + plotH - ((v - rng.min) / (rng.max - rng.min)) * plotH;
+            };
+
+            // 网格 + 纵轴数值
+            ctx.font = '10px ' + cssVar('--vscode-editor-font-family', 'monospace');
+            ctx.strokeStyle = grid;
+            ctx.fillStyle = fg;
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            var steps = 4;
+            for (var s = 0; s <= steps; s++) {
+              var val = rng.min + ((rng.max - rng.min) * s) / steps;
+              var y = yOf(val);
+              ctx.beginPath();
+              ctx.moveTo(padL, y);
+              ctx.lineTo(padL + plotW, y);
+              ctx.stroke();
+              ctx.fillText(Number(val).toFixed(2), padL - 6, y);
+            }
+
+            // 双折线
+            var polylines = [
+              { arr: hgt, color: hgtColor },
+              { arr: szt, color: sztColor },
+            ];
+            for (var p = 0; p < polylines.length; p++) {
+              ctx.beginPath();
+              for (var k = 0; k < n; k++) {
+                if (k === 0) ctx.moveTo(xOf(k), yOf(polylines[p].arr[k]));
+                else ctx.lineTo(xOf(k), yOf(polylines[p].arr[k]));
+              }
+              ctx.strokeStyle = polylines[p].color;
+              ctx.lineWidth = 1.4;
+              ctx.stroke();
+            }
+
+            // x 轴刻度：times 抽样 6 个标注
+            ctx.fillStyle = fg;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            var ticks = 5;
+            for (var t = 0; t <= ticks; t++) {
+              var idx = Math.round((t * (n - 1)) / ticks);
+              ctx.fillText(String(times[idx]), xOf(idx), padT + plotH + 6);
+            }
+
+            // 文字图例
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = hgtColor;
+            ctx.fillRect(padL, 6, 12, 3);
+            ctx.fillStyle = fg;
+            ctx.fillText('沪股通', padL + 16, 2);
+            ctx.fillStyle = sztColor;
+            ctx.fillRect(padL + 70, 6, 12, 3);
+            ctx.fillStyle = fg;
+            ctx.fillText('深股通', padL + 86, 2);
+          });
+        }
+
+        /* ================= Tab 3：大盘指数（多线同图不同色） ================= */
+        function drawIndex(items) {
+          withCanvas(function (ctx, w, h) {
+            var lines = [];
+            for (var i = 0; i < items.length; i++) {
+              var it = items[i] || {};
+              var price = it.price || [];
+              var seq = [];
+              for (var k = 0; k < price.length; k++) {
+                if (isFinite(Number(price[k]))) seq.push(Number(price[k]));
+              }
+              if (seq.length) lines.push({ name: it.name || it.code || '', spark: seq, pct: Number(it.percent) || 0 });
+            }
+            // 腾讯源可能返回大量指数条目，图例/线条按序取前 8 只，保证可读
+            if (lines.length > 8) lines = lines.slice(0, 8);
+            if (!lines.length) return;
+
+            var padL = 64;
+            var padR = 20;
+            var padT = 24 + lines.length * 16;
+            var padB = 16;
+            var plotW = w - padL - padR;
+            var plotH = h - padT - padB;
+            if (plotW <= 0 || plotH <= 0) return;
+
+            var fg = cssVar('--vscode-descriptionForeground', '#9d9d9d');
+            var grid = cssVar('--vscode-editorWidget-border', 'rgba(128,128,128,.25)');
+
+            var series = [];
+            for (var m = 0; m < lines.length; m++) series.push(lines[m].spark);
+            var rng = rangeOf(series);
+            var n = lines[0].spark.length;
+            var xOf = function (i) {
+              return padL + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+            };
+            var yOf = function (v) {
+              return padT + plotH - ((v - rng.min) / (rng.max - rng.min)) * plotH;
+            };
+
+            // 网格 + 纵轴
+            ctx.font = '10px ' + cssVar('--vscode-editor-font-family', 'monospace');
+            ctx.strokeStyle = grid;
+            ctx.fillStyle = fg;
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            var steps = 4;
+            for (var s = 0; s <= steps; s++) {
+              var val = rng.min + ((rng.max - rng.min) * s) / steps;
+              var y = yOf(val);
+              ctx.beginPath();
+              ctx.moveTo(padL, y);
+              ctx.lineTo(padL + plotW, y);
+              ctx.stroke();
+              ctx.fillText(Number(val).toFixed(0), padL - 6, y);
+            }
+
+            // 逐指数折线
+            for (var p = 0; p < lines.length; p++) {
+              var arr = lines[p].spark;
+              ctx.beginPath();
+              for (var q = 0; q < arr.length; q++) {
+                if (q === 0) ctx.moveTo(xOf(q), yOf(arr[q]));
+                else ctx.lineTo(xOf(q), yOf(arr[q]));
+              }
+              ctx.strokeStyle = palette(p);
+              ctx.lineWidth = 1.4;
+              ctx.stroke();
+
+              // 图例：名称 + 涨跌幅（着色区分涨跌）
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = palette(p);
+              ctx.fillRect(padL, 8 + p * 16, 10, 3);
+              ctx.fillStyle = lines[p].pct >= 0 ? palette(0) : palette(1);
+              var sign = lines[p].pct >= 0 ? '+' : '';
+              ctx.fillText(
+                lines[p].name + ' ' + sign + lines[p].pct.toFixed(2) + '%',
+                padL + 14,
+                14 + p * 16
+              );
+            }
+          });
+        }
+
+        /* ================= 渲染分发 ================= */
+        function render() {
+          updateTabs();
+
+          var box = $('chartEmpty');
+          var wrap = $('chartWrap');
+          var data = cache[currentTab];
+
+          // 未登录引导（仅 cjl tab）：按钮换起 quantLogin 登录面板
+          if (currentTab === 'cjl' && cjlUnlogged) {
+            wrap.style.display = 'none';
+            box.style.display = 'inline-flex';
+            box.innerHTML =
+              '<div class="guide">量价分层数据需授权「量价掘金」读取\n' +
+              '<button class="btn" id="loginBtn">微信扫码登录</button></div>';
+            $('loginBtn').addEventListener('click', function () {
+              vscode.postMessage({ command: 'openLogin' });
+            });
+            return;
+          }
+
+          if (data === undefined || data === null) {
+            wrap.style.display = 'none';
+            box.style.display = 'inline-flex';
+            box.innerHTML =
+              data === undefined
+                ? '<div class="empty-text">数据加载中…</div>'
+                : '<div class="empty-text">数据加载失败，点击重试</div>';
+            box.className = 'empty' + (data === null ? ' retriable' : '');
+            return;
+          }
+
+          box.style.display = 'none';
+          box.className = 'empty';
+          wrap.style.display = 'block';
+
+          if (currentTab === 'cjl') drawCjl(data);
+          else if (currentTab === 'north') drawNorth(data);
+          else drawIndex(data.index);
+        }
+
+        /* ================= 消息 ================= */
+        window.addEventListener('message', function (event) {
+          var msg = event.data;
+          if (!msg || msg.type !== 'init' || !msg.data || !msg.data.tab) return;
+          var data = msg.data;
+
+          currentTab = data.tab;
+          // cjl 推送携带登录标记，供未登录引导区分显示
+          cjlUnlogged = data.cjlUnlogged === true;
+
+          // 仅更新本次推送对应 tab 的缓存，其他 tab 缓存保留（避免覆盖已取数据）
+          if (data.tab === 'cjl') cache.cjl = data.cjl;
+          else if (data.tab === 'north') cache.north = data.north;
+          else cache.index = data.index;
+
+          var ts = data.updatedAt;
+          $('updatedAt').textContent = ts ? '更新于 ' + new Date(ts).toLocaleTimeString() : '';
+          setStatus('');
+          render();
+        });
+
+        /* ================= 交互 ================= */
+        var TAB_IDS = { tabCjl: 'cjl', tabNorth: 'north', tabIndex: 'index' };
+        for (var tid in TAB_IDS) {
+          (function (id) {
+            $(id).addEventListener('click', function () {
+              var tab = TAB_IDS[id];
+              if (tab === currentTab) return;
+              currentTab = tab;
+              render();
+              vscode.postMessage({ command: 'selectTab', tab: tab });
+            });
+          })(tid);
+        }
+
+        $('refreshBtn').addEventListener('click', function () {
+          vscode.postMessage({ command: 'refresh' });
+        });
+
+        // 失败占位点击重试（元素不随 innerHTML 重建，启动时绑定一次）
+        $('chartEmpty').addEventListener('click', function () {
+          if (cache[currentTab] === null) {
+            vscode.postMessage({ command: 'refresh' });
+          }
+        });
+
+        setStatus('连接中…');
+        vscode.postMessage({ command: 'ready' });
+      })();
+    </script>
+  </body>
+</html>

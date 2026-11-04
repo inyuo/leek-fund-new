@@ -44,4 +44,7 @@ class Uri {
   }
 }
 
-module.exports = { TreeItem, EventEmitter, ThemeIcon, Uri, TreeItemCollapsibleState };
+/** 与 vscode ViewColumn 同形（面板宿主测试只用到 One） */
+const ViewColumn = { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9 };
+
+module.exports = { TreeItem, EventEmitter, ThemeIcon, Uri, TreeItemCollapsibleState, ViewColumn };

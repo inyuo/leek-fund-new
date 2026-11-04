@@ -970,9 +970,19 @@ export function registerQuant(context: ExtensionContext, quantProvider: QuantPro
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.quantOpen', (target) => {
-      /* Task 6/7 接入：const { quantPanel } = require('./webview/quantPanel'); */
-      const tab = (target && target.tab) || 'north';
-      console.info(`[LJGX] 量化面板（${tab}）将在后续版本提供`);
+      /* Task 7 接入：量化图表面板（tab：cjl 量价分层 / north 北向 / index 大盘）。
+         登录存储引用在开面板前注入 —— 面板未登录引导的 openLogin 会直接打开登录面板 */
+      const { initQuantLogin } = require('./webview/quantLogin');
+      const { initQuantPanel, quantPanel } = require('./webview/quantPanel');
+      initQuantLogin(createVscodeStorage(context.globalState));
+      initQuantPanel(createVscodeStorage(context.globalState));
+      const VALID_TABS = ['cjl', 'north', 'index'];
+      const tab =
+        target && VALID_TABS.indexOf(target.tab) !== -1 ? target.tab : 'north';
+      // code 可选：预留个股量价分层查询（tab==='cjl' 时替代默认指数集合）
+      const code =
+        target && typeof target.code === 'string' ? target.code : undefined;
+      quantPanel(tab, code);
     })
   );
   context.subscriptions.push(
