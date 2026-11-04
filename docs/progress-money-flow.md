@@ -130,3 +130,62 @@
   列表 3 只 A 股带名称（hk00700 正确过滤）、分析 5 分组结构化、
   `fetchStockAnalysis` 文本首行与原来一致、详情 `analysis=array/5`、
   名称接口失败降级 `name:""` 且资金流数据不受影响。
+
+## 量价掘金集成（2026-11-04）
+
+> 需求：侧边栏「量价掘金」树视图（登录态/暗盘榜单）+ 双面板
+> （量价分层/北向资金流面板 + 大盘指数 spark 面板）+ 微信扫码登录。
+> 数据源：xxjwxc（`weixin.login` SSE / `get_dark_buy` / `get_share_cjl` / `weixin.re_login`）
+> + 东财 `kamt.rtmin`（北向）+ 腾讯 `hs/index`（大盘），零新依赖（复用 axios）。
+> 分支 `dev` · 提交范围 `78fa4a8..6891e2f`（8 个功能提交，Task 1~7）
+
+### 功能摘要
+
+- **登录**：微信扫码 + SSE 长连接自动截获登录态，会话落库（`globalState`），
+  失效（1018 / `relogin:true`）自动清除回未登录态；网络失败保守保留会话。
+- **树视图**：`leekFundView.quant` 分区 —— 登录引导节点 / 暗盘榜单（30min TTL 缓存）/
+  双面板入口；未登录时只显示登录引导 + 面板入口。
+- **双面板**：量价分层（`get_share_cjl` 成交量分时 canvas 自绘）+
+  北向资金流（东财沪/深股通分时）；大盘指数 spark（腾讯分时 + 涨跌幅）；
+  未登录打开 cjl 面板显示登录引导（`cjlUnlogged` 契约）。
+
+### 架构
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 数据层 | `src/shared/ljgxData.ts` | SSE 解析（纯函数 `extractSseEvents`）、会话存取（`load/save/clear/checkSession`）、登录监听 `startLoginWatch`、授权接口 `fetchDarkBuy`/`fetchShareCjl`（1018 降级）、免登录接口 `fetchNorthFundTrends`/`fetchIndexSpark` |
+| 登录 UI | `src/webview/quantLogin.ts` + `template/quant-login.html` | 二维码自绘 canvas + SSE 自动截获登录态 |
+| 图表面板 | `src/webview/quantPanel.ts` + `template/quant.html` | cjl/北向/index 三个 tab，canvas 自绘零依赖 |
+| 树视图 | `src/explorer/quantProvider.ts` | 登录态 + 榜单 + 面板入口，`registerQuant` 供面板登录成功后 refresh |
+
+### 登录流程（3 行）
+
+1. 设备号 `getDeviceId` 固化 `did` → SSE 连接 `weixin.login?did=...` 等待扫码帧。
+2. 用户扫码后服务器推 `status:1 + sessionId` 帧 → `saveSession` 落库，断开监听，刷新树/面板。
+3. 启动静默校验 `weixin.re_login`（`checkSession`）：`relogin:true` → 清库；网络失败 → 保留会话。
+
+### 实测记录（Task 8 真机 e2e，node 直连编译产物，不 mock）
+
+| 用例 | 结果 |
+|---|---|
+| `checkSession(store{sessionId:"123"})` | 服务器 `relogin:true` → 返回 `null` 且 store 已清 ✓ |
+| `fetchDarkBuy()` 无会话 | 返回 `null` 不抛错（不发请求）✓ |
+| `weixin.login?did=VSCODE_…`（已登录 did） | 200 / `event:msg` 首帧 `status:1` + sessionId ✓ |
+| `fetchDarkBuy(真实会话)` | title `2026-11-03`、100 条榜单；前 3：宁德时代 5.95亿/12.85亿、阳光电源 5.54亿/5.41亿、银之杰 3.62亿/-2030.38万 |
+| `fetchShareCjl(["sh000001"])` | tm `2026-11-03`、price 121 点（6028981582.5 → 426411760642）✓ |
+| `fetchNorthFundTrends()` | `times` 121 点（9:30→11:30，当日仅上午数据）；`hgtNet`/`szgtNet` 全 0（北向当日无发布，数据源时段所致，如实记录不算失败） |
+| `fetchIndexSpark()` | 1 条（sh000001，price 121 点，percent ≈ -0.10%）；腾讯 `scenes=6` 响应仅含上证一分时，非解析丢数据 |
+
+### SSE 真机补验（Task 2 遗留 cannot-verify 项）
+
+- 裸 http 流式读 3 秒：`content-type: text/event-stream`，已登录态 **75ms** 内收到
+  首帧 `event:msg`，服务器推 `status:1` 帧后主动关闭流（`stream end` 正常触发）。
+- 首帧 JSON keys 顺序：`code, url, status, userId, userName, avatarUrl, rg, vip, sessionId`
+  —— **不含 `overdueTime`**（Task 6 疑虑消解：SSE 首帧无该字段，会话 overdueTime 由
+  `checkSession` 的 `re_login` 响应补全）。
+
+### TDD 基线
+
+- 起始 **103 passing** → 最终 **155 passing**（+52：数据层/监听器/树视图/登录/面板逐任务递增 118→123→130→134→143→147→155）。
+- `yarn compile`（tsc）0 error；`npx eslint src --ext ts` 0 error / 5 warning（既有基线，无新增）。
+
