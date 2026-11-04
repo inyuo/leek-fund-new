@@ -111,6 +111,182 @@ export function extractSseEvents(text: string): { events: string[]; rest: string
 }
 
 /**
+ * 登录的 SSE 流地址（微信扫码长连接）。
+ * 帧载荷 {code, url, status, userId, userName, avatarUrl, rg, sessionId}：
+ * status:0 = 等待扫码（url 为二维码图片直链）；status:1 = 已登录（sessionId 有值）。
+ */
+function buildLoginUrl(did: string): string {
+  return `${LJGX_API_BASE}/weixin.login?did=${encodeURIComponent(did)}`;
+}
+
+/**
+ * 生产 httpStream：axios GET 打开 SSE 流，返回响应流（Node Readable）。
+ * 不设 timeout —— SSE 是长连接，设了会在空闲期被 axios 掐断；
+ * 断线由流 error/close 事件兜底走静默重连，与 checkSession 的降级惯例一致。
+ */
+async function defaultHttpStream(url: string): Promise<any> {
+  const res = await axios.get(url, { responseType: 'stream' });
+  return res.data;
+}
+
+/** 统一关流：真 stream 用 destroy，假对象（EventEmitter 等）没有则静默跳过 */
+function destroyStream(stream: any): void {
+  if (!stream) return;
+  try {
+    if (typeof stream.destroy === 'function') stream.destroy();
+    else if (typeof stream.close === 'function') stream.close();
+  } catch (e) {
+    console.error('[LJGX] 关闭登录流失败', errMsg(e));
+  }
+}
+
+export interface LjgxLoginHandlers {
+  /** 等待扫码：url 为二维码图片直链，raw 为整帧 JSON */
+  onQrcode(url: string, raw: any): void;
+  /** 已登录：组装好的会话（已落库） */
+  onLogin(session: LjgxSession): void;
+}
+
+export interface LjgxLoginDeps {
+  /** 测试注入假流；默认 axios GET responseType:'stream' */
+  httpStream?: (url: string) => any;
+  /** 默认由调用方传 createVscodeStorage(context.globalState) */
+  store?: LjgxStorage;
+}
+
+/**
+ * 登录监听器：SSE 长连接 + 断线重连。
+ *
+ * 流程：GET /weixin.login?did=<did> → 持有跨 chunk 残行 rest，chunk 到达时
+ * 拼接后经 extractSseEvents 解析 → 逐帧 JSON 分发：
+ * - status:1 → 组装 LjgxSession（openId←userId，overdueTime 先置 0 等首查补齐）
+ *   落库并回调 onLogin，然后自动停止（不再重连、不再回调）；
+ * - 其余帧 → 回调 onQrcode(raw.url, raw)。
+ * 网络断开（end/close/error，含 httpStream 同步抛错与 Promise reject）→ 静默
+ * 节流 1s 后重连，一直重试、绝不抛错；重连不清已存在的会话 —— 清库只由
+ * checkSession 的业务信号（relogin:true）触发（任务 1 裁定延伸）。
+ * stop() 关当前流并停重连；onLogin 后与 stop 后到达的帧一律忽略。
+ * deps.httpStream 供测试注入假流（EventEmitter 模拟 data/end/error）。
+ */
+export function startLoginWatch(
+  did: string,
+  handlers: LjgxLoginHandlers,
+  deps?: LjgxLoginDeps
+): { stop(): void } {
+  const url = buildLoginUrl(did);
+  const store = deps && deps.store;
+  const getStream = (deps && deps.httpStream) || defaultHttpStream;
+
+  const RECONNECT_DELAY_MS = 1000; // 失败节流，防死循环
+
+  let stopped = false; // 用户显式 stop()
+  let done = false; // onLogin 已触发，自动停止
+  let timer: any = null; // 待执行的重连
+  let current: any = null; // 当前活跃流
+
+  function stop(): void {
+    stopped = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    destroyStream(current);
+    current = null;
+  }
+
+  function scheduleReconnect(): void {
+    if (stopped || done || timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      connect();
+    }, RECONNECT_DELAY_MS);
+  }
+
+  function dispatchEvent(raw: any): boolean {
+    if (raw && raw.status === 1 && typeof raw.sessionId === 'string' && raw.sessionId) {
+      const session: LjgxSession = {
+        sessionId: raw.sessionId,
+        openId: typeof raw.userId === 'string' ? raw.userId : '',
+        overdueTime: 0,
+        userName: typeof raw.userName === 'string' ? raw.userName : '',
+        avatarUrl: typeof raw.avatarUrl === 'string' ? raw.avatarUrl : '',
+        did,
+      };
+      done = true;
+      if (store) saveSession(store, session);
+      handlers.onLogin(session);
+      stop();
+      return true;
+    }
+    // 等待扫码帧；sessionId 缺失的 status:1 视为脏帧，同样按二维码处理
+    handlers.onQrcode(raw && raw.url, raw);
+    return false;
+  }
+
+  function connect(): void {
+    if (stopped || done) return;
+
+    // httpStream 同步返回假流 → 同步挂接（保证注入流的事件不丢帧）；
+    // 生产 axios 返回 Promise → then 挂接、catch 走断线重连。
+    let result: any;
+    try {
+      result = getStream(url);
+    } catch (e) {
+      console.error('[LJGX] 登录流建立失败，稍后重连', errMsg(e));
+      scheduleReconnect();
+      return;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(attachStream).catch((e: any) => {
+        console.error('[LJGX] 登录流建立失败，稍后重连', errMsg(e));
+        scheduleReconnect();
+      });
+      return;
+    }
+    attachStream(result);
+  }
+
+  function attachStream(stream: any): void {
+    if (stopped || done) {
+      // stop/onLogin 抢先发生：直接丢弃已建立的连接
+      destroyStream(stream);
+      return;
+    }
+    current = stream;
+
+    let rest = ''; // 跨 chunk 残行缓冲（extractSseEvents 是纯函数，调用方持有）
+    stream.on('data', (chunk: any) => {
+      if (stopped || done) return;
+      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      const parsed = extractSseEvents(rest + text);
+      rest = parsed.rest;
+      for (const event of parsed.events) {
+        let raw: any = null;
+        try {
+          raw = JSON.parse(event);
+        } catch (e) {
+          // 解析失败帧（任务裁定）：静默忽略，不断流不重连
+          console.error('[LJGX] 登录帧 JSON 解析失败，忽略该帧', errMsg(e));
+          continue;
+        }
+        if (dispatchEvent(raw)) return; // 已登录 → 自动停
+      }
+    });
+
+    // 端上断流：end / close / error 任一即静默重连（可能多次触发，靠 timer 幂等）
+    stream.on('end', scheduleReconnect);
+    stream.on('close', scheduleReconnect);
+    stream.on('error', (e: any) => {
+      console.error('[LJGX] 登录流断开，稍后重连', errMsg(e));
+      scheduleReconnect();
+    });
+  }
+
+  connect();
+  return { stop };
+}
+
+/**
  * 启动时静默校验登录态：POST /weixin.re_login（header user-token: sessionId）。
  * 只在业务明确信号时清会话：响应成功且 `relogin:true`（会话过期）→ 清库返回 null；
  * 响应成功且 `relogin:false` → 用响应里的 overdueTime/nickName/avatarURL 刷新本地

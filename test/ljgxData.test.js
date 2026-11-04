@@ -7,6 +7,7 @@
  * checkSession 经 deps.axios 注入假对象（返回 {status, data} 形状）。
  */
 const assert = require('assert');
+const { EventEmitter } = require('events');
 const ljgx = require('../out/shared/ljgxData');
 
 const SESSION_KEY = 'leek-fund.ljgxSession';
@@ -113,6 +114,204 @@ describe('会话存取 saveSession/loadSession/clearSession', () => {
 
     store.update(SESSION_KEY, { openId: 'o1' });
     assert.strictEqual(ljgx.loadSession(store), null, '缺 sessionId 不应放行');
+  });
+});
+
+/** 假 SSE 流：EventEmitter 模拟 Node stream，支持 destroy（stop() 会调用） */
+function fakeStream() {
+  const s = new EventEmitter();
+  s.destroyed = false;
+  s.destroy = function () {
+    this.destroyed = true;
+  };
+  return s;
+}
+
+/** 记录每次连接的 url 与对应假流，测试按序取用 */
+function fakeHttpFactory() {
+  const records = [];
+  const fn = (url) => {
+    const stream = fakeStream();
+    records.push({ url, stream });
+    return stream;
+  };
+  return { fn, records };
+}
+
+// SSE 一帧 data 事件即可被 extractSseEvents 消费的文本
+function sseFrame(obj) {
+  return `data:${JSON.stringify(obj)}\n\n`;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('登录监听器 startLoginWatch', () => {
+  const QR_RAW = { code: 0, status: 0, url: 'https://qr.example/x.png' };
+
+  it('首帧 status:0 回调 onQrcode 且不落库', function () {
+    this.timeout(3000);
+    const store = memStore();
+    store.update(DEVICE_KEY, 'LEEK_t1_did');
+
+    const f = fakeHttpFactory();
+    const qrcodes = [];
+    const watch = ljgx.startLoginWatch(
+      'LEEK_t1_did',
+      { onQrcode: (url) => qrcodes.push(url), onLogin: () => assert.fail('等待扫码不应回调 onLogin') },
+      { httpStream: f.fn, store }
+    );
+
+    assert.strictEqual(f.records.length, 1, '应发起一次连接');
+    assert.ok(
+      /weixin\.login\?did=LEEK_t1_did$/.test(f.records[0].url),
+      `应请求登录 SSE 接口，实际 ${f.records[0].url}`
+    );
+
+    f.records[0].stream.emit('data', sseFrame(QR_RAW));
+
+    assert.deepStrictEqual(qrcodes, ['https://qr.example/x.png'], '应回调 onQrcode(raw.url)');
+    assert.strictEqual(ljgx.loadSession(store), null, '等待扫码不得落库');
+
+    watch.stop();
+  });
+
+  it('首帧直接 status:1（重连补状态场景）落库并回调 onLogin 后停', async function () {
+    this.timeout(3000);
+    const store = memStore();
+    store.update(DEVICE_KEY, 'LEEK_t2_did');
+
+    const f = fakeHttpFactory();
+    const logins = [];
+    const watch = ljgx.startLoginWatch(
+      'LEEK_t2_did',
+      { onQrcode: () => assert.fail('status:1 不应回调 onQrcode'), onLogin: (s) => logins.push(s) },
+      { httpStream: f.fn, store }
+    );
+
+    f.records[0].stream.emit(
+      'data',
+      sseFrame({
+        code: 1,
+        status: 1,
+        sessionId: 'wx_sess_re',
+        userId: 'oX_re',
+        userName: '浮沉',
+        avatarUrl: 'https://a/re.png',
+      })
+    );
+
+    const expected = {
+      sessionId: 'wx_sess_re',
+      openId: 'oX_re',
+      overdueTime: 0,
+      userName: '浮沉',
+      avatarUrl: 'https://a/re.png',
+      did: 'LEEK_t2_did',
+    };
+    assert.deepStrictEqual(logins, [expected], 'onLogin 应收到组装好的会话');
+    assert.deepStrictEqual(ljgx.loadSession(store), expected, 'status:1 必须落库');
+
+    // 登录成功自动停：后续 end 也不得再开新连接、不再回调
+    f.records[0].stream.emit('end');
+    await sleep(1150);
+    assert.strictEqual(f.records.length, 1, 'onLogin 后应自动停止，不得重连');
+    assert.ok(f.records[0].stream.destroyed, '停止时应关闭当前流');
+
+    watch.stop(); // 幂等：已停后再调不报错
+  });
+
+  it('流断开后重连：注入假 httpStream 第二次成功，onLogin 正常触发', async function () {
+    this.timeout(3000);
+    const store = memStore();
+    store.update(DEVICE_KEY, 'LEEK_t3_did');
+
+    const f = fakeHttpFactory();
+    const qrcodes = [];
+    const logins = [];
+    const watch = ljgx.startLoginWatch(
+      'LEEK_t3_did',
+      { onQrcode: (url) => qrcodes.push(url), onLogin: (s) => logins.push(s) },
+      { httpStream: f.fn, store }
+    );
+
+    // 第一次连接：先推等待扫码帧，再断流 —— 不得清任何状态
+    f.records[0].stream.emit('data', sseFrame(QR_RAW));
+    f.records[0].stream.emit('end');
+    assert.strictEqual(f.records.length, 1, 'end 后应节流 1s，不得立刻重连');
+    assert.deepStrictEqual(qrcodes, ['https://qr.example/x.png'], '断流前收到的帧应照常回调');
+
+    await sleep(1150);
+    assert.strictEqual(f.records.length, 2, '流断开后应静默重连');
+
+    // 重连首帧直接 status:1（服务端补状态）
+    f.records[1].stream.emit(
+      'data',
+      sseFrame({ status: 1, sessionId: 'wx_r1', userId: 'oR1', userName: 'rs', avatarUrl: 'u1' })
+    );
+    assert.strictEqual(logins.length, 1, '重连后 onLogin 正常触发');
+    assert.strictEqual(logins[0].sessionId, 'wx_r1');
+    assert.strictEqual(ljgx.loadSession(store).sessionId, 'wx_r1', '重连登录应落库');
+
+    watch.stop();
+  });
+
+  it('stop() 后不再重连也不再回调', async function () {
+    this.timeout(3000);
+    const store = memStore();
+    store.update(DEVICE_KEY, 'LEEK_t4_did');
+
+    const f = fakeHttpFactory();
+    const qrcodes = [];
+    const logins = [];
+    const watch = ljgx.startLoginWatch(
+      'LEEK_t4_did',
+      { onQrcode: (url) => qrcodes.push(url), onLogin: (s) => logins.push(s) },
+      { httpStream: f.fn, store }
+    );
+
+    watch.stop(); // 立即停止
+    assert.ok(f.records[0].stream.destroyed, 'stop 应关闭当前流');
+
+    // stop 后到达的帧与断流事件都不得触发任何回调或重连
+    f.records[0].stream.emit('data', sseFrame({ status: 1, sessionId: 'wx_x', userId: 'oX' }));
+    f.records[0].stream.emit('end');
+    await sleep(1150);
+    assert.deepStrictEqual(logins, [], 'stop 后不得回调 onLogin');
+    assert.strictEqual(ljgx.loadSession(store), null, 'stop 后不得落库');
+    assert.strictEqual(f.records.length, 1, 'stop 后不得重连');
+  });
+
+  it('httpStream 直接失败（Promise reject）→ 静默重连且不清现有会话', async function () {
+    this.timeout(3500);
+    const store = memStore();
+    const existing = sampleSession({ did: 'LEEK_t5_did' });
+    ljgx.saveSession(store, existing);
+
+    let calls = 0;
+    let secondStream = null;
+    const logins = [];
+    const httpStream = () => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error('ECONNRESET'));
+      secondStream = fakeStream();
+      return secondStream;
+    };
+
+    const watch = ljgx.startLoginWatch('LEEK_t5_did', { onQrcode: () => {}, onLogin: (s) => logins.push(s) }, { httpStream, store });
+    assert.strictEqual(calls, 1, '失败后应节流，不得立刻重试');
+
+    await sleep(1150);
+    assert.strictEqual(calls, 2, '网络失败 1s 后应静默重连');
+    assert.deepStrictEqual(ljgx.loadSession(store), existing, '失败重连不得清现有会话');
+
+    secondStream.emit(
+      'data',
+      sseFrame({ status: 1, sessionId: 'wx_rej', userId: 'oRj', userName: 'rj', avatarUrl: 'r' })
+    );
+    assert.strictEqual(logins.length, 1);
+    assert.strictEqual(logins[0].sessionId, 'wx_rej');
+
+    watch.stop();
   });
 });
 
