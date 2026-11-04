@@ -120,6 +120,33 @@ describe('量化面板模板 quant.html', () => {
     assert.strictEqual(page.el('chartWrap').style.display, 'block', '有数据应显示画布');
   });
 
+  it('index 数据 → 大盘多指数折线绘制，图例出现指数名称', () => {
+    const page = loadTemplate('quant.html');
+    page.fire('message', {
+      data: {
+        type: 'init',
+        data: initPayload('index', {
+          index: [
+            { code: 'sh000001', name: '上证指数', price: [3600, 3610, 3595, 3620], percent: 0.35 },
+            { code: 'sz399001', name: '深证成指', price: [11200, 11250, 11310, 11280], percent: 0.98 },
+          ],
+        }),
+      },
+    });
+
+    assert.strictEqual(page.el('tabIndex').className.indexOf('active') >= 0, true, 'index Tab 应高亮');
+    const ctx = page.el('chart').getContext('2d');
+    const lineTos = count(ctx, 'lineTo');
+    assert.ok(lineTos >= 4, `大盘双指数应产生足够 lineTo，实际 ${lineTos}`);
+    const texts = ctx.calls
+      .filter((c) => c.name === 'fillText')
+      .map((c) => String(c.args[0]))
+      .join('|');
+    assert.ok(texts.indexOf('上证指数') !== -1, `图例应含指数名称，实际：${texts}`);
+    assert.ok(texts.indexOf('深证成指') !== -1, `图例应含第二个指数名称，实际：${texts}`);
+    assert.strictEqual(page.el('chartWrap').style.display, 'block', '有数据应显示画布');
+  });
+
   it('cjl 数据为 null（已登录）→ 数据加载失败占位，点击重试发 refresh', () => {
     const page = loadTemplate('quant.html');
     page.fire('message', {
