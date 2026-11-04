@@ -112,8 +112,11 @@ export function extractSseEvents(text: string): { events: string[]; rest: string
 
 /**
  * 启动时静默校验登录态：POST /weixin.re_login（header user-token: sessionId）。
- * HTTP/网络失败或 `relogin:true`（会话过期）→ 清库并返回 null；
- * 成功 → 用响应里的 overdueTime/nickName/avatarURL 刷新本地会话并返回最新 session。
+ * 只在业务明确信号时清会话：响应成功且 `relogin:true`（会话过期）→ 清库返回 null；
+ * 响应成功且 `relogin:false` → 用响应里的 overdueTime/nickName/avatarURL 刷新本地
+ * 会话并返回最新 session。
+ * 网络失败 / HTTP 非 200 / 响应不可解析（state!==true）→ 失败静默降级：保留现有
+ * 会话原样返回，不清库（与所有数据层函数「失败不抛错」惯例一致）。
  * deps.axios 仅供测试注入，生产默认 require 的 axios。
  */
 export async function checkSession(
@@ -136,15 +139,18 @@ export async function checkSession(
 
     if (!res || res.status >= 400) {
       console.error('[LJGX] re_login HTTP error', res && res.status, res && res.statusText);
-      clearSession(store);
-      return null;
+      return session;
     }
 
     // 外层 {state, error, data} 包装；re_login 载荷字段名与存储结构不同：
     // nickName→userName、avatarURL→avatarUrl、overdueTime 为 unix 秒
     const data = res.data && res.data.state === true ? res.data.data : null;
-    if (!data || data.relogin !== false) {
-      console.error('[LJGX] 会话失效（re_login relogin!=false）');
+    if (!data) {
+      console.error('[LJGX] re_login 响应不可解析（state!==true）');
+      return session;
+    }
+    if (data.relogin !== false) {
+      console.error('[LJGX] 会话过期（re_login relogin:true），清库回未登录态');
       clearSession(store);
       return null;
     }
@@ -158,7 +164,7 @@ export async function checkSession(
     return session;
   } catch (e) {
     console.error('[LJGX] re_login 请求失败', errMsg(e));
-    clearSession(store);
-    return null;
+    // 网络失败≠会话失效（业务信号），保守保留现有会话
+    return session;
   }
 }

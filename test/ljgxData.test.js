@@ -189,9 +189,10 @@ describe('登录态校验 checkSession', () => {
     assert.strictEqual(seen.headers['user-token'], 'wx_tok_42', 'sessionId 应放 user-token header');
   });
 
-  it('network 异常返回 null 且清库（不抛异常）', async () => {
+  it('network 异常 → 保守返回原 session 且不清库（不抛异常）', async () => {
     const store = memStore();
-    ljgx.saveSession(store, sampleSession());
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
 
     const mockAxios = {
       post: async () => {
@@ -199,20 +200,34 @@ describe('登录态校验 checkSession', () => {
       },
     };
     const r = await ljgx.checkSession(store, { axios: mockAxios });
-    assert.strictEqual(r, null);
-    assert.strictEqual(ljgx.loadSession(store), null, '失败也应清库');
+    assert.deepStrictEqual(r, original, '网络失败应保留原会话原样返回，不清库');
+    assert.deepStrictEqual(ljgx.loadSession(store), original, '本地会话不得被破坏');
   });
 
-  it('HTTP >=400 返回 null 且清库', async () => {
+  it('HTTP >=400 → 保守返回原 session 且不清库', async () => {
     const store = memStore();
-    ljgx.saveSession(store, sampleSession());
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
 
     const mockAxios = {
       post: async () => ({ status: 500, data: {} }),
     };
     const r = await ljgx.checkSession(store, { axios: mockAxios });
-    assert.strictEqual(r, null);
-    assert.strictEqual(ljgx.loadSession(store), null);
+    assert.deepStrictEqual(r, original, 'HTTP 非 200 应保留原会话');
+    assert.deepStrictEqual(ljgx.loadSession(store), original);
+  });
+
+  it('响应不可解析（state!==true）→ 保守返回原 session 且不清库', async () => {
+    const store = memStore();
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
+
+    const mockAxios = {
+      post: async () => ({ status: 200, data: { state: false, code: 500, error: 'boom' } }),
+    };
+    const r = await ljgx.checkSession(store, { axios: mockAxios });
+    assert.deepStrictEqual(r, original, '不可解析响应≠业务信号，不得清会话');
+    assert.deepStrictEqual(ljgx.loadSession(store), original);
   });
 
   it('无 session 时直接返回 null 不发请求', async () => {
