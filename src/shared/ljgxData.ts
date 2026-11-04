@@ -287,6 +287,140 @@ export function startLoginWatch(
 }
 
 /**
+ * 授权数据接口公共降级层：带 user-token 的 POST 封装（任务 3 裁定惯例：
+ * 网络 / HTTP / 响应不可解析失败 → null 且不清会话；state:false 且 code:1018
+ * （会话失效）→ markExpired(store)（默认 clearSession）+ null）。
+ */
+export interface LjgxFetchDeps {
+  /** 测试注入假 axios；生产默认 require 的 axios */
+  axios?: typeof axios;
+  /** 生产侧传 createVscodeStorage(context.globalState) */
+  store?: LjgxStorage;
+  /** 会话失效钩子，默认 clearSession（Memento.update(key, undefined) 删 key） */
+  markExpired?: (store: LjgxStorage) => void;
+}
+
+/**
+ * 统一 POST：路径拼 LJGX_API_BASE、user-token header、timeout 30s、
+ * validateStatus 恒 true（HTTP >= 400 归一为 null，不让 axios 抛）。
+ * 返回 data.data 载荷（不可解析为 null），调用方只做字段归一化。
+ */
+async function ljgxPostAuth(
+  path: string,
+  body: Record<string, any>,
+  deps?: LjgxFetchDeps
+): Promise<any> {
+  const store = deps && deps.store;
+  const session = store ? loadSession(store) : null;
+  if (!session || !store) return null; // 未登录无凭据，直接降级（不发请求）
+
+  const client = (deps && deps.axios) || axios;
+  try {
+    const res = await client.post(`${LJGX_API_BASE}/${path}`, body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'user-token': session.sessionId,
+      },
+      timeout: LJGX_TIMEOUT,
+      validateStatus: () => true,
+    });
+
+    if (!res || res.status >= 400) {
+      console.error('[LJGX]', path, 'HTTP error', res && res.status, res && res.statusText);
+      return null;
+    }
+
+    const data = res.data;
+    // 会话失效的业务信号：清库（经 markExpired 钩子，默认 clearSession）
+    if (data && data.state === false && data.code === 1018) {
+      console.error('[LJGX]', path, '会话失效（code:1018），清除会话');
+      const markExpired = (deps && deps.markExpired) || clearSession;
+      markExpired(store);
+      return null;
+    }
+    if (!data || data.state !== true || !data.data) {
+      console.error('[LJGX]', path, '响应不可解析（state!==true）');
+      return null;
+    }
+    return data.data;
+  } catch (e) {
+    console.error('[LJGX]', path, '请求失败', errMsg(e));
+    return null;
+  }
+}
+
+/** 数字收敛：仅保留有限数字（剔除 null/NaN/Infinity/字符串） */
+function validNumber(v: any): boolean {
+  return typeof v === 'number' && isFinite(v);
+}
+
+/** 暗盘榜单条目归一化字段（解析容错：缺失字段一律空串） */
+export interface DarkBuyItem {
+  code: string;
+  name: string;
+  td1: string;
+  td2: string;
+  color1: string;
+  color2: string;
+  url: string;
+  ext: string;
+}
+
+/** 字符串收敛：非字符串一律空串 */
+function str(v: any): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/**
+ * 暗盘榜单：POST /shares.get_dark_buy，body {days, tag}（默认 days=2, tag='all'）。
+ * 成功 data.data = {title:<日期字符串>, vaild, thList, list:[...]}，此处只保留
+ * title 与归一化后的 list（DarkBuyItem）。失败策略见 ljgxPostAuth。
+ */
+export async function fetchDarkBuy(
+  days = 2,
+  tag = 'all',
+  deps?: LjgxFetchDeps
+): Promise<{ title: string; list: DarkBuyItem[] } | null> {
+  const payload = await ljgxPostAuth('shares.get_dark_buy', { days, tag }, deps);
+  if (!payload) return null;
+
+  const rawList = Array.isArray(payload.list) ? payload.list : [];
+  const list: DarkBuyItem[] = rawList.map((it: any) => ({
+    code: str(it && it.code),
+    name: str(it && it.name),
+    td1: str(it && it.td1),
+    td2: str(it && it.td2),
+    color1: str(it && it.color1),
+    color2: str(it && it.color2),
+    url: str(it && it.url),
+    ext: str(it && it.ext),
+  }));
+  return { title: str(payload.title), list };
+}
+
+/**
+ * 量价分层（成交量接口）：POST /analy.get_share_cjl，body {codes:[...]}。
+ * 成功 data.data = {tm:<日期>, price:<数值数组，可能含 null 元素>, ...}，
+ * 此处只保留 tm 与过滤后的 price（剔除非有限数字）。失败策略同上。
+ */
+export async function fetchShareCjl(
+  codes: string[],
+  deps?: LjgxFetchDeps
+): Promise<{ tm: string; price: number[] } | null> {
+  const body = { codes: Array.isArray(codes) ? codes : [] };
+  const payload = await ljgxPostAuth('analy.get_share_cjl', body, deps);
+  if (!payload) return null;
+  if (!Array.isArray(payload.price)) {
+    console.error('[LJGX] analy.get_share_cjl 载荷不可解析（price 非数组）');
+    return null;
+  }
+  return {
+    tm: str(payload.tm),
+    price: payload.price.filter(validNumber),
+  };
+}
+
+/**
  * 启动时静默校验登录态：POST /weixin.re_login（header user-token: sessionId）。
  * 只在业务明确信号时清会话：响应成功且 `relogin:true`（会话过期）→ 清库返回 null；
  * 响应成功且 `relogin:false` → 用响应里的 overdueTime/nickName/avatarURL 刷新本地

@@ -313,6 +313,31 @@ describe('登录监听器 startLoginWatch', () => {
 
     watch.stop();
   });
+
+  it('跨 chunk 半帧拼接：一帧 data 被网络切成两段也能解析出完整 url', function () {
+    this.timeout(3000);
+    const store = memStore();
+    store.update(DEVICE_KEY, 'LEEK_t6_did');
+
+    const f = fakeHttpFactory();
+    const qrcodes = [];
+    const watch = ljgx.startLoginWatch(
+      'LEEK_t6_did',
+      { onQrcode: (url) => qrcodes.push(url), onLogin: () => assert.fail('不应回调 onLogin') },
+      { httpStream: f.fn, store }
+    );
+
+    // 同一帧 data 被切成两个半段：第一段含上半行，第二段补完并带事件边界
+    const frame = sseFrame(QR_RAW);
+    const cut = Math.floor(frame.length / 2);
+    f.records[0].stream.emit('data', frame.slice(0, cut));
+    assert.deepStrictEqual(qrcodes, [], '半帧不应产生事件');
+    f.records[0].stream.emit('data', frame.slice(cut));
+
+    assert.deepStrictEqual(qrcodes, [QR_RAW.url], '监听器应持有残行并拼接，回调完整 url 一次');
+
+    watch.stop();
+  });
 });
 
 describe('登录态校验 checkSession', () => {
@@ -441,5 +466,188 @@ describe('登录态校验 checkSession', () => {
     const r = await ljgx.checkSession(store, { axios: mockAxios });
     assert.strictEqual(r, null);
     assert.strictEqual(calls, 0, '本地无会话不应发请求');
+  });
+});
+
+describe('授权数据接口 fetchDarkBuy / fetchShareCjl', () => {
+  /** 记录请求条件的 mock axios */
+  function recordingAxios(payloadOfCall) {
+    const calls = [];
+    return {
+      calls,
+      post: async (url, body, opts) => {
+        calls.push({ url, body, headers: opts && opts.headers });
+        return payloadOfCall(calls.length, calls[calls.length - 1]);
+      },
+    };
+  }
+
+  /** 真实 shares.get_dark_buy 响应载荷（2026-11-04 实测验证格式） */
+  function darkBuyPayload() {
+    return {
+      state: true,
+      error: 'normal',
+      data: {
+        title: '2026-11-03（周二）',
+        vaild: 1,
+        thList: ['名称', '现价', '涨幅'],
+        list: [
+          {
+            code: 'sz300750',
+            simpleCode: '300750',
+            ext: '创',
+            name: '宁德时代',
+            price: 258.5,
+            percent: 2.3,
+            optional: 0,
+            td1: '5.95亿',
+            td2: '12.85亿',
+            data1: 1,
+            data2: 2,
+            color1: '#ff0000',
+            color2: '#00aa00',
+            url: '/pages/add/add?scode=sz300750',
+            value1: 9,
+          },
+          // 缺 td2/color1/url/ext 的条目 → 容错为空串
+          { code: 'sh688981', name: '中芯国际', td1: '3.20亿', color2: '#00aa00', price: 88.8 },
+        ],
+      },
+    };
+  }
+
+  it('正常载荷 → 归一化数组 + title，带 user-token header 与默认 body', async () => {
+    const store = memStore();
+    ljgx.saveSession(store, sampleSession({ sessionId: 'wx_tok_77' }));
+
+    const mock = recordingAxios(() => ({ status: 200, data: darkBuyPayload() }));
+    const r = await ljgx.fetchDarkBuy(2, 'all', { axios: mock, store });
+
+    assert.strictEqual(mock.calls.length, 1, '应恰好请求一次');
+    assert.ok(
+      /\/shares\.get_dark_buy$/.test(mock.calls[0].url),
+      `应请求 shares.get_dark_buy，实际 ${mock.calls[0].url}`
+    );
+    assert.deepStrictEqual(mock.calls[0].body, { days: 2, tag: 'all' }, '默认 days/tag 入参');
+    assert.strictEqual(mock.calls[0].headers['user-token'], 'wx_tok_77', 'sessionId 放 user-token header');
+
+    assert.deepStrictEqual(r, {
+      title: '2026-11-03（周二）',
+      list: [
+        {
+          code: 'sz300750',
+          name: '宁德时代',
+          td1: '5.95亿',
+          td2: '12.85亿',
+          color1: '#ff0000',
+          color2: '#00aa00',
+          url: '/pages/add/add?scode=sz300750',
+          ext: '创',
+        },
+        {
+          code: 'sh688981',
+          name: '中芯国际',
+          td1: '3.20亿',
+          td2: '',
+          color1: '',
+          color2: '#00aa00',
+          url: '',
+          ext: '',
+        },
+      ],
+    }, '只保留归一化字段，缺失字段容错为空串');
+  });
+
+  it('state:false code:1018 → 返回 null 且 clearSession 被调用（内存 store 验证）', async () => {
+    const store = memStore();
+    ljgx.saveSession(store, sampleSession());
+
+    const mock = recordingAxios(() => ({
+      status: 200,
+      data: { state: false, code: 1018, error: '登录已过期' },
+    }));
+
+    const r = await ljgx.fetchDarkBuy(2, 'all', { axios: mock, store });
+
+    assert.strictEqual(r, null, '1018 应返回 null');
+    assert.strictEqual(ljgx.loadSession(store), null, '1018 → 默认 clearSession 应清掉会话');
+  });
+
+  it('网络异常 → 返回 null 不抛，且不清会话', async () => {
+    const store = memStore();
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
+
+    const mockAxios = {
+      post: async () => {
+        throw new Error('timeout of 30000ms exceeded');
+      },
+    };
+    const r = await ljgx.fetchDarkBuy(2, 'all', { axios: mockAxios, store });
+    assert.strictEqual(r, null, '网络失败应静默返回 null');
+    assert.deepStrictEqual(ljgx.loadSession(store), original, '网络失败≠会话失效，不得清库');
+  });
+
+  it('HTTP >=400 / state!==true → 返回 null 不抛，且不清会话', async () => {
+    const store = memStore();
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
+
+    const r1 = await ljgx.fetchDarkBuy(2, 'all', {
+      axios: recordingAxios(() => ({ status: 500, data: {} })),
+      store,
+    });
+    assert.strictEqual(r1, null, 'HTTP 500 应返回 null');
+
+    const r2 = await ljgx.fetchDarkBuy(2, 'all', {
+      axios: recordingAxios(() => ({ status: 200, data: { state: false, code: 500, error: 'boom' } })),
+      store,
+    });
+    assert.strictEqual(r2, null, 'state!==true 且非 1018 应返回 null');
+    assert.deepStrictEqual(ljgx.loadSession(store), original, '非 1018 失败不得清库');
+  });
+
+  it('fetchShareCjl 正常载荷：price 过滤掉 null 与非数字，保留数字（含 0）', async () => {
+    const store = memStore();
+    ljgx.saveSession(store, sampleSession({ sessionId: 'wx_tok_88' }));
+
+    const mock = recordingAxios(() => ({
+      status: 200,
+      data: { state: true, error: 'normal', data: { tm: '2026-11-03', price: [3456.78, null, 0, 'bad', 123.45, NaN] } },
+    }));
+    const r = await ljgx.fetchShareCjl(['sh000001', 'sz399001'], { axios: mock, store });
+
+    assert.strictEqual(mock.calls.length, 1);
+    assert.ok(
+      /\/analy\.get_share_cjl$/.test(mock.calls[0].url),
+      `应请求 analy.get_share_cjl，实际 ${mock.calls[0].url}`
+    );
+    assert.deepStrictEqual(
+      mock.calls[0].body,
+      { codes: ['sh000001', 'sz399001'] },
+      'codes 数组原样放 body'
+    );
+    assert.strictEqual(mock.calls[0].headers['user-token'], 'wx_tok_88', 'sessionId 放 user-token header');
+
+    assert.deepStrictEqual(r, { tm: '2026-11-03', price: [3456.78, 0, 123.45] }, 'null/非数字剔除，0 保留');
+  });
+
+  it('fetchShareCjl 同错误策略：1018 清会话返回 null，网络异常不清会话', async () => {
+    const store = memStore();
+    const original = sampleSession();
+    ljgx.saveSession(store, original);
+
+    const r1 = await ljgx.fetchShareCjl(['sh000001'], {
+      axios: recordingAxios(() => ({ status: 200, data: { state: false, code: 1018, error: '登录已过期' } })),
+      store,
+    });
+    assert.strictEqual(r1, null, '1018 应返回 null');
+    assert.strictEqual(ljgx.loadSession(store), null, '1018 应清掉会话');
+
+    ljgx.saveSession(store, original);
+    const mockAxios = { post: async () => { throw new Error('ECONNRESET'); } };
+    const r2 = await ljgx.fetchShareCjl(['sh000001'], { axios: mockAxios, store });
+    assert.strictEqual(r2, null, '网络异常应返回 null');
+    assert.deepStrictEqual(ljgx.loadSession(store), original, '网络异常不得清库');
   });
 });
