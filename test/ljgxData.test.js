@@ -651,3 +651,148 @@ describe('授权数据接口 fetchDarkBuy / fetchShareCjl', () => {
     assert.deepStrictEqual(ljgx.loadSession(store), original, '网络异常不得清库');
   });
 });
+
+describe('免登录数据接口 fetchNorthFundTrends / fetchIndexSpark', () => {
+  /**
+   * 东财 kamt.rtmin 真实载荷形状（2026-11-04 实测，数值替换为可断言样本）：
+   * data.s2n 为『时间,沪股通净流入,深股通净流入,合计』字符串数组；
+   * 未到的分时样本为 `-` 占位（如 10:56,-,-,-），早盘前为 0.00。
+   */
+  function kamtPayload() {
+    return {
+      rc: 0,
+      rt: 14,
+      data: {
+        s2n: [
+          '9:30,5.10,6.20,11.30',
+          '9:31,-8.30,7.40,-0.90',
+          '10:56,-,-,-',
+          '10:57,,,',
+        ],
+        n2s: ['9:00,1.00,2.00,3.00'],
+        s2nDate: '11-04',
+        n2sDate: '11-04',
+      },
+    };
+  }
+
+  it('北向资金：正常载荷 → s2n 逗号归一化，剔除 -/空样本行，带浏览器头', async () => {
+    const calls = [];
+    const mock = {
+      get: async (url, opts) => {
+        calls.push({ url, opts });
+        return { status: 200, data: kamtPayload() };
+      },
+    };
+
+    const r = await ljgx.fetchNorthFundTrends({ axios: mock });
+
+    assert.strictEqual(calls.length, 1, '应恰好请求一次');
+    assert.ok(
+      /push2\.eastmoney\.com\/api\/qt\/kamt\.rtmin\/get\?.*ut=/.test(calls[0].url),
+      `应请求东财 kamt.rtmin，实际 ${calls[0].url}`
+    );
+    assert.ok(/quote\.eastmoney\.com/.test(calls[0].opts.headers.Referer), '带 quote.eastmoney.com Referer 防风控');
+    assert.strictEqual(
+      calls[0].opts.validateStatus(500),
+      true,
+      'validateStatus 恒 true（HTTP >=400 归一为 null）'
+    );
+
+    assert.deepStrictEqual(r, {
+      times: ['9:30', '9:31'],
+      hgtNet: [5.1, -8.3],
+      szgtNet: [6.2, 7.4],
+    }, '剔除 - 占位行与空字段行，三数组保持对齐');
+  });
+
+  it('北向资金：s2n 缺失 / 样本全空 → null 不抛', async () => {
+    const mock1 = { get: async () => ({ status: 200, data: { rc: 0, data: {} } }) };
+    const r1 = await ljgx.fetchNorthFundTrends({ axios: mock1 });
+    assert.strictEqual(r1, null, 'data.s2n 缺失应返回 null');
+
+    const mock2 = {
+      get: async () => ({ status: 200, data: { rc: 0, data: { s2n: ['9:30,-,-,-'] } } }),
+    };
+    const r2 = await ljgx.fetchNorthFundTrends({ axios: mock2 });
+    assert.strictEqual(r2, null, '样本全部无效应返回 null');
+
+    const mock3 = {
+      get: async () => { throw new Error('ECONNRESET'); },
+    };
+    const r3 = await ljgx.fetchNorthFundTrends({ axios: mock3 });
+    assert.strictEqual(r3, null, '网络异常应静默返回 null');
+  });
+
+  /**
+   * 腾讯 hs/index 真实载荷形状（2026-11-04 实测，数值截短）：
+   * 不存在 esllt_list，等价数组为 data.minute_set（对象值形态），
+   * 条目 {code, pre, data: ["0930 价 量", ...]}，无 name/zdf 字段。
+   */
+  function qqIndexPayload() {
+    return {
+      code: 0,
+      data: {
+        now: '20261104105447',
+        minute_set: {
+          minute_sh_index: {
+            code: 'sh000001',
+            date: '20261104',
+            pre: '3608.10',
+            data: ['0930 3605.39 5145513', '0931 3648.10 22603113'],
+          },
+        },
+      },
+    };
+  }
+
+  it('大盘指数：正常载荷 → code/price 分时价解析，percent 由 pre 与最新价推导', async () => {
+    const calls = [];
+    const mock = {
+      get: async (url, opts) => {
+        calls.push({ url, opts });
+        return { status: 200, data: qqIndexPayload() };
+      },
+    };
+
+    const r = await ljgx.fetchIndexSpark({ axios: mock });
+
+    assert.strictEqual(calls.length, 1, '应恰好请求一次');
+    assert.ok(
+      /proxy\.finance\.qq\.com\/cgi\/cgi-bin\/market\/hs\/index\?scenes=6$/.test(calls[0].url),
+      `应请求腾讯 hs/index，实际 ${calls[0].url}`
+    );
+    assert.ok(String(calls[0].opts.headers['User-Agent'] || '').includes('Mozilla'), '带浏览器 UA');
+
+    assert.ok(Array.isArray(r) && r.length === 1, '应解析出一条指数');
+    const item = r[0];
+    assert.strictEqual(item.code, 'sh000001');
+    assert.strictEqual(item.name, '', '实测载荷无 name，容错为空串');
+    assert.deepStrictEqual(item.price, [3605.39, 3648.1], '分时价的第二段');
+    assert.strictEqual(
+      item.percent,
+      ((3648.1 - 3608.1) / 3608.1) * 100,
+      'percent = (最新价 - 昨收) / 昨收 * 100'
+    );
+  });
+
+  it('大盘指数：esllt_list 或等价数组整体缺失 → null 不抛', async () => {
+    const mock1 = {
+      get: async () => ({ status: 200, data: { code: 0, data: { now: '20261104105447' } } }),
+    };
+    const r1 = await ljgx.fetchIndexSpark({ axios: mock1 });
+    assert.strictEqual(r1, null, 'esllt_list/minute_set 均缺失应返回 null');
+
+    const mock2 = {
+      get: async () => ({ status: 200, data: { code: 0, data: { minute_set: {} } } }),
+    };
+    const r2 = await ljgx.fetchIndexSpark({ axios: mock2 });
+    assert.strictEqual(r2, null, '等价数组为空应返回 null');
+
+    const mock3 = {
+      get: async () => { throw new Error('timeout'); },
+    };
+    const r3 = await ljgx.fetchIndexSpark({ axios: mock3 });
+    assert.strictEqual(r3, null, '网络异常应静默返回 null');
+  });
+});
