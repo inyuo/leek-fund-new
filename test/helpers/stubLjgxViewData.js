@@ -31,8 +31,8 @@ module.exports = {
   loadSession() {
     return state.session;
   },
-  fetchShareCjl(codes) {
-    calls.push({ name: 'fetchShareCjl', codes });
+  fetchShareCjl(codes, deps) {
+    calls.push({ name: 'fetchShareCjl', codes, deps });
     return Promise.resolve(state.cjl);
   },
   fetchNorthFundTrends() {

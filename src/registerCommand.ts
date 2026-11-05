@@ -26,6 +26,7 @@ import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
 import { NewsProvider } from './explorer/newsProvider';
+import { resolveNewsSourceUrl } from './explorer/xxjwxcNews';
 import { QuantProvider, registerQuantProviderForRefresh } from './explorer/quantProvider';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
@@ -291,7 +292,7 @@ export function registerViewEvent(
   context.subscriptions.push(
     commands.registerCommand('leek-fund.viewMainFundFlow', () => mainFundFlow())
   );
-  // 资金动态（自选股主力净流入 / 分时资金流 / 行业资金流）
+  // 资金动态（个股资金三块表格 / 分时资金流 / 行业资金流）
   context.subscriptions.push(
     commands.registerCommand('leek-fund.viewStockFundFlow', () => {
       const { stockFundFlow } = require('./webview/stockFundFlow');
@@ -391,11 +392,13 @@ export function registerViewEvent(
   /**
    * News command
    */
-  // 资讯条目：在浏览器打开金十原文
+  // 资讯条目：登录后按来源打开对应官网子页；降级/未分组条目沿用自身 url
   context.subscriptions.push(
     commands.registerCommand('leek-fund.newItemClick', (news) => {
-      if (news && news.url) {
-        env.openExternal(Uri.parse(news.url));
+      if (!news) return;
+      const url = news.source ? resolveNewsSourceUrl(news.source) : news.url;
+      if (url) {
+        env.openExternal(Uri.parse(url));
       }
     })
   );
@@ -951,10 +954,9 @@ export function registerViewEvent(
 
 /**
  * 量价掘金（量化面板）命令注册：
- * - quantLogin / quantOpen 面板 webview 由 Task 6/7 接入（require 懒加载形式），
- *   本任务先注册占位实现，保证点击有行为与提示；
- * - refreshQuant 清 provider 榜单缓存重新拉取；
- * - 启动时静默校验会话 + 预热榜单（不 await，完成后自动重绘）。
+ * - quantLogin / quantOpen 懒加载登录面板与 4-tab 量化面板；
+ * - refreshQuant 重新校验会话并重绘（暗盘榜单已于 2026-11-04 移除）；
+ * - 启动时静默校验会话（不 await，完成后自动重绘）。
  */
 export function registerQuant(context: ExtensionContext, quantProvider: QuantProvider) {
   // Task 6：记录 provider 引用，登录面板登录成功后回调 refreshQuantTree() 重绘
@@ -970,19 +972,21 @@ export function registerQuant(context: ExtensionContext, quantProvider: QuantPro
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.quantOpen', (target) => {
-      /* Task 7 接入：量化图表面板（tab：cjl 量价分层 / north 北向 / index 大盘）。
+      /* 量化面板（tab：cjl 量价分层 / north 北向 / index 大盘 / lq 策略选股）。
          登录存储引用在开面板前注入 —— 面板未登录引导的 openLogin 会直接打开登录面板 */
       const { initQuantLogin } = require('./webview/quantLogin');
       const { initQuantPanel, quantPanel } = require('./webview/quantPanel');
       initQuantLogin(createVscodeStorage(context.globalState));
       initQuantPanel(createVscodeStorage(context.globalState));
-      const VALID_TABS = ['cjl', 'north', 'index'];
+      const VALID_TABS = ['cjl', 'north', 'index', 'lq'];
       const tab =
         target && VALID_TABS.indexOf(target.tab) !== -1 ? target.tab : 'north';
       // code 可选：预留个股量价分层查询（tab==='cjl' 时替代默认指数集合）
       const code =
         target && typeof target.code === 'string' ? target.code : undefined;
-      quantPanel(tab, code);
+      // tag 可选：tab==='lq' 时定位到某一类策略（面板内部校验合法性）
+      const tag = target && typeof target.tag === 'string' ? target.tag : undefined;
+      quantPanel(tab, code, tag);
     })
   );
   context.subscriptions.push(

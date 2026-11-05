@@ -121,6 +121,98 @@
       .guide .btn {
         margin-top: 8px;
       }
+
+      /* ---------- 策略选股（第 4 tab，DOM 表格） ---------- */
+      .lq-wrap {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding: 8px 12px 16px;
+        display: none;
+      }
+      .lq-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .lq-chip {
+        cursor: pointer;
+        border: 1px solid var(--vscode-panel-border, #444);
+        background: transparent;
+        color: var(--vscode-descriptionForeground, #999);
+        border-radius: 12px;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      .lq-chip.active {
+        color: var(--vscode-editor-foreground, #ccc);
+        border-color: var(--vscode-focusBorder, #007acc);
+        background: var(--vscode-list-activeSelectionBackground, rgba(0, 122, 204, 0.18));
+      }
+      .lq-links {
+        color: var(--vscode-descriptionForeground, #999);
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .lq-links span {
+        margin-right: 8px;
+      }
+      .lq-group {
+        margin-bottom: 14px;
+      }
+      .lq-group-title {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 0;
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
+      }
+      .lq-group-title .count {
+        color: var(--vscode-descriptionForeground, #999);
+        font-weight: 400;
+      }
+      .lq-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .lq-table th {
+        text-align: left;
+        font-weight: 400;
+        color: var(--vscode-descriptionForeground, #999);
+        padding: 4px 6px;
+      }
+      .lq-table td {
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--vscode-panel-border, rgba(68, 68, 68, 0.4));
+      }
+      .lq-table tr:hover {
+        background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.05));
+      }
+      .lq-row-btn {
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        color: var(--vscode-textLink-foreground, #3794ff);
+        font-family: inherit;
+        font-size: 12px;
+        padding: 0;
+      }
+      .lq-up {
+        color: var(--vscode-charts-red, #f14c4c);
+      }
+      .lq-down {
+        color: var(--vscode-charts-green, #4ec9b0);
+      }
+      .lq-placeholder {
+        padding: 24px 0;
+        text-align: center;
+        color: var(--vscode-descriptionForeground, #999);
+      }
+      .lq-placeholder.retriable {
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -136,12 +228,20 @@
       <button class="tab" id="tabCjl" data-tab="cjl">量价分层</button>
       <button class="tab" id="tabNorth" data-tab="north">北向资金</button>
       <button class="tab" id="tabIndex" data-tab="index">大盘指数</button>
+      <button class="tab" id="tabLq" data-tab="lq">策略选股</button>
     </div>
 
     <div class="chart-wrap" id="chartWrap">
       <canvas id="chart"></canvas>
     </div>
     <div id="chartEmpty" class="empty" style="display: none">数据加载中…</div>
+
+    <div class="lq-wrap" id="lqWrap">
+      <div class="lq-bar" id="lqTags"></div>
+      <div class="lq-bar" id="lqDays"></div>
+      <div class="lq-links" id="lqTsTags"></div>
+      <div id="lqGroups"></div>
+    </div>
 
     <script>
       (function () {
@@ -155,9 +255,16 @@
          * 各 tab 数据缓存：undefined = 未拉取（切换后推 null，null = 拉取失败/空），
          * 有值 = 已拉取对象。仅更新本次 init 对应 tab，其他 tab 缓存保留。
          */
-        var cache = { cjl: undefined, north: undefined, index: undefined };
+        var cache = { cjl: undefined, north: undefined, index: undefined, lq: undefined };
         /** 量价分层 tab 是否未登录（宿主随 cjl 推送下发，引导复用 quantLogin 面板） */
         var cjlUnlogged = false;
+        /** 策略选股 tab 是否未登录（同一会话，宿主随 lq 推送下发） */
+        var lqUnlogged = false;
+        /** 策略/天数元数据由宿主 init 下发（单一数据源：shared/lqData） */
+        var LQ_TAG_META = [];
+        var LQ_DAY_META = [];
+        var currentLqTag = 'ztb';
+        var currentLqDays = 1;
 
         var PAL_VARS = [
           ['--vscode-charts-red', '#f14c4c'],
@@ -193,14 +300,27 @@
         }
 
         function updateTabs() {
-          var keys = ['cjl', 'north', 'index'];
-          var ids = ['tabCjl', 'tabNorth', 'tabIndex'];
+          var keys = ['cjl', 'north', 'index', 'lq'];
+          var ids = ['tabCjl', 'tabNorth', 'tabIndex', 'tabLq'];
           for (var i = 0; i < keys.length; i++) {
             $(ids[i]).className = 'tab' + (keys[i] === currentTab ? ' active' : '');
           }
         }
 
         /* ================= canvas 公共 ================= */
+        /** 布局未完成（rect 0×0）时的延迟重画：有上限防隐藏面板下无限轮询 */
+        var pendingRedraw = 0;
+        var redrawAttempts = 0;
+        var REDRAW_MAX_ATTEMPTS = 20;
+        function scheduleRedraw() {
+          if (pendingRedraw || redrawAttempts >= REDRAW_MAX_ATTEMPTS) return;
+          redrawAttempts += 1;
+          pendingRedraw = setTimeout(function () {
+            pendingRedraw = 0;
+            render();
+          }, 120);
+        }
+
         function withCanvas(draw) {
           var canvas = $('chart');
           var wrap = $('chartWrap');
@@ -209,7 +329,11 @@
           var rect = wrap.getBoundingClientRect();
           var w = rect.width;
           var h = rect.height;
-          if (!(w > 0) || !(h > 0)) return;
+          if (!(w > 0) || !(h > 0)) {
+            // webview 首帧布局未完成：静默跳过并安排重画（init 消息可能先于布局到达）
+            scheduleRedraw();
+            return;
+          }
 
           var dpr = window.devicePixelRatio || 1;
           canvas.width = Math.floor(w * dpr);
@@ -218,6 +342,8 @@
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           ctx.clearRect(0, 0, w, h);
           draw(ctx, w, h);
+          // 布局已就绪：清零重画计数，避免 20 次上限在面板多次隐藏后耗尽
+          redrawAttempts = 0;
         }
 
         /** 数轴范围：合并多条序列的 min/max，相等时 ±1 防退化 */
@@ -477,6 +603,18 @@
 
           var box = $('chartEmpty');
           var wrap = $('chartWrap');
+          var lqWrap = $('lqWrap');
+
+          // 第 4 tab 走 DOM 表格，不进入 canvas 绘制路径
+          if (currentTab === 'lq') {
+            wrap.style.display = 'none';
+            box.style.display = 'none';
+            lqWrap.style.display = 'block';
+            renderLq();
+            return;
+          }
+          lqWrap.style.display = 'none';
+
           var data = cache[currentTab];
 
           // 未登录引导（仅 cjl tab）：按钮换起 quantLogin 登录面板
@@ -509,7 +647,116 @@
 
           if (currentTab === 'cjl') drawCjl(data);
           else if (currentTab === 'north') drawNorth(data);
-          else drawIndex(data);
+          else if (currentTab === 'index') drawIndex(data);
+        }
+
+        /* ================= 策略选股（第 4 tab） ================= */
+        /** 第三方文本进 innerHTML 前转义，避免注入 */
+        function esc(text) {
+          return String(text === undefined || text === null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
+        function percentCell(percent) {
+          if (percent === null || percent === undefined || !isFinite(percent)) return '<td>-</td>';
+          var cls = percent >= 0 ? 'lq-up' : 'lq-down';
+          var sign = percent >= 0 ? '+' : '';
+          return '<td class="' + cls + '">' + sign + Number(percent).toFixed(2) + '%</td>';
+        }
+
+        /** 策略 chips 与天数 chips（元数据由宿主 init 下发） */
+        function renderLqBars() {
+          var tagHtml = '';
+          for (var i = 0; i < LQ_TAG_META.length; i++) {
+            var t = LQ_TAG_META[i];
+            tagHtml +=
+              '<button type="button" class="lq-chip' +
+              (t.tag === currentLqTag ? ' active' : '') +
+              '" data-tag="' + esc(t.tag) + '">' + esc(t.label) + '</button>';
+          }
+          $('lqTags').innerHTML = tagHtml;
+
+          var dayHtml = '';
+          for (var j = 0; j < LQ_DAY_META.length; j++) {
+            var d = LQ_DAY_META[j];
+            dayHtml +=
+              '<button type="button" class="lq-chip' +
+              (d.num === currentLqDays ? ' active' : '') +
+              '" data-days="' + d.num + '">' + esc(d.name) + '</button>';
+          }
+          $('lqDays').innerHTML = dayHtml;
+        }
+
+        /** 两级分组表格：未登录/加载中/失败/空数据各有占位 */
+        function renderLq() {
+          renderLqBars();
+          var data = cache.lq;
+          var box = $('lqGroups');
+
+          if (lqUnlogged) {
+            $('lqTsTags').innerHTML = '';
+            box.innerHTML =
+              '<div class="lq-placeholder">策略选股数据需授权「量价掘金」读取<br>' +
+              '<button class="btn" id="lqLoginBtn" style="margin-top:8px">微信扫码登录</button></div>';
+            $('lqLoginBtn').addEventListener('click', function () {
+              vscode.postMessage({ command: 'openLogin' });
+            });
+            return;
+          }
+
+          if (data === undefined) {
+            $('lqTsTags').innerHTML = '';
+            box.innerHTML = '<div class="lq-placeholder">数据加载中…</div>';
+            return;
+          }
+          if (data === null) {
+            $('lqTsTags').innerHTML = '';
+            box.innerHTML =
+              '<div class="lq-placeholder retriable" id="lqRetry">数据加载失败，点击重试</div>';
+            $('lqRetry').addEventListener('click', function () {
+              vscode.postMessage({ command: 'refresh' });
+            });
+            return;
+          }
+
+          var links = '';
+          var ts = data.tsTags || [];
+          for (var k = 0; k < ts.length; k++) {
+            if (ts[k] && ts[k].doc) links += '<span>' + esc(ts[k].doc) + '</span>';
+          }
+          $('lqTsTags').innerHTML = links;
+
+          var groups = data.groups || [];
+          if (!groups.length) {
+            box.innerHTML = '<div class="lq-placeholder">暂无数据</div>';
+            return;
+          }
+
+          var html = '';
+          for (var g = 0; g < groups.length; g++) {
+            var group = groups[g];
+            var rows = group.rows || [];
+            html +=
+              '<div class="lq-group"><div class="lq-group-title">' +
+              esc(group.title || '未命名分组') +
+              ' <span class="count">' + rows.length + ' 只</span></div>' +
+              '<table class="lq-table"><thead><tr><th>代码</th><th>名称</th><th>涨跌幅</th>' +
+              '<th>说明</th><th></th></tr></thead><tbody>';
+            for (var r = 0; r < rows.length; r++) {
+              var row = rows[r];
+              html +=
+                '<tr><td>' + esc(row.code) + '</td><td>' + esc(row.name) + '</td>' +
+                percentCell(row.percent) + '<td>' + esc(row.note) + '</td>' +
+                '<td><button type="button" class="lq-row-btn" data-code="' +
+                esc(row.code) + '">资金动态</button></td></tr>';
+            }
+            html += '</tbody></table></div>';
+          }
+          box.innerHTML = html;
         }
 
         /* ================= 消息 ================= */
@@ -521,11 +768,19 @@
           currentTab = data.tab;
           // cjl 推送携带登录标记，供未登录引导区分显示
           cjlUnlogged = data.cjlUnlogged === true;
+          lqUnlogged = data.lqUnlogged === true;
+          if (Array.isArray(data.lqTags)) LQ_TAG_META = data.lqTags;
+          if (Array.isArray(data.lqDays)) LQ_DAY_META = data.lqDays;
 
           // 仅更新本次推送对应 tab 的缓存，其他 tab 缓存保留（避免覆盖已取数据）
           if (data.tab === 'cjl') cache.cjl = data.cjl;
           else if (data.tab === 'north') cache.north = data.north;
-          else cache.index = data.index;
+          else if (data.tab === 'index') cache.index = data.index;
+          else if (data.tab === 'lq') {
+            cache.lq = data.lq;
+            if (data.lq && data.lq.tag) currentLqTag = data.lq.tag;
+            if (data.lq && data.lq.days) currentLqDays = data.lq.days;
+          }
 
           var ts = data.updatedAt;
           $('updatedAt').textContent = ts ? '更新于 ' + new Date(ts).toLocaleTimeString() : '';
@@ -534,7 +789,12 @@
         });
 
         /* ================= 交互 ================= */
-        var TAB_IDS = { tabCjl: 'cjl', tabNorth: 'north', tabIndex: 'index' };
+        var TAB_IDS = {
+          tabCjl: 'cjl',
+          tabNorth: 'north',
+          tabIndex: 'index',
+          tabLq: 'lq',
+        };
         for (var tid in TAB_IDS) {
           (function (id) {
             $(id).addEventListener('click', function () {
@@ -556,6 +816,26 @@
           if (cache[currentTab] === null) {
             vscode.postMessage({ command: 'refresh' });
           }
+        });
+
+        // 策略选股：三个容器各绑一次点击委托（innerHTML 重建不影响委托）
+        $('lqTags').addEventListener('click', function (e) {
+          var tag = e && e.target && e.target.getAttribute ? e.target.getAttribute('data-tag') : null;
+          if (tag) vscode.postMessage({ command: 'selectLqTag', tag: tag });
+        });
+        $('lqDays').addEventListener('click', function (e) {
+          var days = e && e.target && e.target.getAttribute ? e.target.getAttribute('data-days') : null;
+          if (days) vscode.postMessage({ command: 'selectLqDays', days: Number(days) });
+        });
+        $('lqGroups').addEventListener('click', function (e) {
+          var code = e && e.target && e.target.getAttribute ? e.target.getAttribute('data-code') : null;
+          if (code) vscode.postMessage({ command: 'openStock', code: code });
+        });
+
+        // 布局变化重画当前图表 tab（策略选股是 DOM 表格，无需重画）
+        window.addEventListener('resize', function () {
+          if (currentTab === 'lq') return;
+          render();
         });
 
         setStatus('连接中…');
