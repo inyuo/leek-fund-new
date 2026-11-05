@@ -67,10 +67,17 @@
       .layout {
         flex: 1 1 auto;
         display: grid;
-        grid-template-columns: 300px minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) 300px;
         gap: 10px;
         padding: 10px;
         min-height: 0;
+      }
+      /* 个股资金三块表格挪到右栏（DOM 顺序不变，靠 grid order 对调列） */
+      .layout > div {
+        order: 1;
+      }
+      #fundPanel {
+        order: 2;
       }
       .panel {
         display: flex;
@@ -319,7 +326,7 @@
     </div>
 
     <div class="layout">
-      <!-- 个股资金三块：主力分析 / 主力资金 / 明-暗盘（未登录时整块隐藏） -->
+      <!-- 个股资金三块：主力分析 / 主力资金 / 明-暗盘（未登录时整块隐藏，排在布局右侧） -->
       <section class="panel" id="fundPanel" style="display: none">
         <header>资金动态 <span class="hint" id="fundHint"></span></header>
         <div class="body" id="fundTables"></div>
@@ -329,7 +336,7 @@
         <section class="panel" style="flex: 0 0 auto">
           <header>
             <span id="detailTitle">分时资金流</span>
-            <span class="hint" id="detailHint">点击左侧股票查看详情</span>
+            <span class="hint" id="detailHint">点击右侧股票查看详情</span>
           </header>
 
           <div class="detail-head" id="detailHead" style="display: none">
@@ -347,7 +354,7 @@
             <div class="tooltip" id="tooltip"></div>
           </div>
           <div id="chartEmpty" class="empty" style="display: none">
-            暂无该股分时资金数据<br />点击左侧任一 A 股查看
+            暂无该股分时资金数据<br />点击右侧任一 A 股查看
           </div>
         </section>
 

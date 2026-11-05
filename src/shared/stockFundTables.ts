@@ -23,7 +23,7 @@ export interface FundTable {
   rows: FundTableRow[];
 }
 
-/** 单块最多渲染 20 行，避免脏数据把左栏撑爆 */
+/** 单块最多渲染 20 行，避免脏数据把右栏撑爆 */
 const MAX_ROWS = 20;
 /** 只接受 CSS 颜色字面量，挡掉 `red;}</style>` 之类注入 */
 const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20})$/;

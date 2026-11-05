@@ -1,13 +1,15 @@
 /**
  * 资金动态窗口模板行为测试（伪 DOM 执行内联 script）：
- * 1) 左栏三块资金表格（主力分析 / 主力资金 / 明-暗盘）跟随选中个股渲染
- * 2) 未登录（fundTables 为空）时左栏整块不显示
+ * 1) 右栏三块资金表格（主力分析 / 主力资金 / 明-暗盘）跟随选中个股渲染
+ * 2) 未登录（fundTables 为空）时右栏整块不显示
  * 3) 顶栏股票下拉仍可切换个股
  * 4) 第三方量化分析按分组卡片渲染
  *
  * 模板是纯字符串拼接渲染，没有 DOM 依赖，用轻量桩即可断言 innerHTML。
  */
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { loadTemplate } = require('./helpers/webview-dom');
 
 /** init 数据：股票下拉 + 行业列表 */
@@ -59,7 +61,23 @@ const TABLES = [
 ];
 
 describe('资金动态模板 stock-fund-flow.html', () => {
-  it('左栏渲染三块资金表格：标题、表头、行值与颜色', () => {
+  it('三块资金表格板块排在布局右侧，主内容列在左', () => {
+    const htmlSrc = fs.readFileSync(
+      path.join(__dirname, '..', 'template', 'stock-fund-flow.html'),
+      'utf8'
+    );
+    // grid 列序：300px 列在右（fr 在前），fundPanel 靠 order 排到第二列
+    assert.ok(
+      /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+300px/.test(htmlSrc),
+      'grid 应为「主内容列 + 右栏 300px」的列序'
+    );
+    assert.ok(/#fundPanel\s*\{[^}]*order:\s*2/.test(htmlSrc), 'fundPanel 应 order:2 排到右侧');
+    assert.ok(/\.layout\s*>\s*div\s*\{[^}]*order:\s*1/.test(htmlSrc), '主内容列应 order:1 排在左侧');
+    // 提示文案不能再指向左栏
+    assert.ok(!htmlSrc.includes('点击左侧'), '提示文案不应再出现「点击左侧」');
+  });
+
+  it('右栏渲染三块资金表格：标题、表头、行值与颜色', () => {
     const page = loadTemplate('stock-fund-flow.html');
     page.fire('message', { data: detailData(TABLES) });
 
@@ -71,10 +89,10 @@ describe('资金动态模板 stock-fund-flow.html', () => {
     assert.ok(html.includes('53.56(38.74%)'), '应渲染行值');
     assert.ok(html.includes('5.51亿'), '应渲染明暗盘净流入');
     assert.ok(html.includes('#ff0000'), '行颜色应透传');
-    assert.strictEqual(page.el('fundPanel').style.display, '', '有数据时左栏可见');
+    assert.strictEqual(page.el('fundPanel').style.display, '', '有数据时右栏可见');
   });
 
-  it('未登录（fundTables 为空）时左栏整块不显示', () => {
+  it('未登录（fundTables 为空）时右栏整块不显示', () => {
     const page = loadTemplate('stock-fund-flow.html');
     page.fire('message', { data: detailData([]) });
 

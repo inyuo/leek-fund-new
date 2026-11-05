@@ -1,7 +1,7 @@
 /**
  * 资金动态宿主回归：三块表格走需登录态的 analy.get_sp，
  * 必须确认 initStockFundFlow 注入的 store 真的传到了 loadStockDetail，
- * 否则线上永远拿不到数据、左栏被当成「未登录」整块隐藏。
+ * 否则线上永远拿不到数据、右栏被当成「未登录」整块隐藏。
  */
 const assert = require('assert');
 const path = require('path');
