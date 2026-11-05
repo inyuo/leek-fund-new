@@ -16,6 +16,7 @@ import { QuantProvider } from './explorer/quantProvider';
 import { StockProvider } from './explorer/stockProvider';
 import StockService from './explorer/stockService';
 import globalState from './globalState';
+import { initXxjNewsStorage } from './explorer/xxjwxcNews';
 import FlashNewsDaemon from './output/flash-news/FlashNewsDaemon';
 import FlashNewsOutputServer from './output/flash-news/FlashNewsOutputServer';
 import { registerCommandPaletteEvent, registerQuant, registerViewEvent } from './registerCommand';
@@ -51,6 +52,9 @@ let profitBar: ProfitStatusBar | null = null;
 export async function activate(context: ExtensionContext) {
   globalState.isDevelopment = process.env.NODE_ENV === 'development';
   globalState.context = context;
+
+  // 资讯登录态切换：注册 globalState 存储引用（有量价掘金会话时资讯走 xxjwxc 官网源）
+  initXxjNewsStorage(createVscodeStorage(context.globalState));
 
   const telemetry = new Telemetry();
   globalState.telemetry = telemetry;
@@ -204,10 +208,11 @@ export async function activate(context: ExtensionContext) {
 
   setIntervalTime();
 
-  /* 资讯（韭研社区流）7x24，不受休市影响，可见时每 30 秒强制刷新 */
+  /* 资讯 7x24 可见时每 30 秒重绘；是否重拉由各来源 TTL 决定
+     （热点/今日快讯 30s，全球新闻/投资日历 5min），手动「刷新资讯」才强制全量 */
   newsRefreshTimer = setInterval(() => {
     if (newsTreeView?.visible) {
-      newsProvider.refresh(true);
+      newsProvider.refresh(false);
     }
   }, 30000);
 

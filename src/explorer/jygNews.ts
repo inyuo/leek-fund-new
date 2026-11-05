@@ -16,6 +16,8 @@ export interface JYGNewsItem {
   summary: string;
   /** 关联股票名称，用于树节点右侧展示 */
   stocksLabel: string;
+  /** 登录后按官网来源分组时的来源标识；未登录/降级条目为空 */
+  source?: string;
 }
 
 /** 去掉 HTML 标签、实体，压缩为单行摘要 */
