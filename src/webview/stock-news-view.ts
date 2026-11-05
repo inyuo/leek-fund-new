@@ -2,9 +2,16 @@ import { ViewColumn, WebviewPanel, window, workspace } from 'vscode';
 import ReusedWebviewPanel from './ReusedWebviewPanel';
 import { getTemplateFileContent } from '../shared/utils';
 import OpenAI from 'openai';
-import { fetchJYGNewsByCode } from './jiuyangongshe-news';
+import { fetchJYGNewsByCode, buildJygNewsAppendix } from './jiuyangongshe-news';
 import { fetchRecentQfqTradeDataForAi } from '../shared/aiStockHistoryData';
 import { fetchStockMainFlow, fetchStockAnalysis, buildStockMoneyFlowAppendix } from '../shared/xxjwxcData';
+import {
+  hasXxjSession,
+  fetchXxjNewsGroupsForAi,
+  buildXxjNewsAppendix,
+} from '../explorer/xxjwxcNews';
+import { fetchStockFundTables, buildStockFundTablesAppendix } from '../shared/stockFundTables';
+import { LjgxStorage } from '../shared/ljgxData';
 import { StockNewsItem, StockNewsPayload } from './leek-center/stock-news-service';
 
 type AiConfig = {
@@ -70,7 +77,7 @@ export class StockNewsView {
     }
   }
 
-  async send_ai_stock_analysis(target: any): Promise<string> {
+  async send_ai_stock_analysis(target: any, deps?: { store?: LjgxStorage }): Promise<string> {
     if (!target?.info) {
       window.showErrorMessage('未获取到股票信息');
       return '';
@@ -95,7 +102,7 @@ export class StockNewsView {
     window.showWarningMessage(
       `开始分析：${target.info.name} 股票 ${rangeLabel}的前复权日线数据，股票代码：${target.info.code}`
     );
-    const baseMessage = `请根据历史数据和韭研公社个股新闻分析以下股票：${target.info.name}，股票代码：${target.info.code}`;
+    const baseMessage = `请结合历史行情、个股资讯与资金数据，分析以下股票：${target.info.name}，股票代码：${target.info.code}`;
 
     // 三组数据并发拉取，各自独立降级：任一失败只丢掉对应附录
     const keyword = String(target?.info?.name || target?.info?.code || '').trim();
@@ -106,16 +113,30 @@ export class StockNewsView {
       return null;
     });
 
-    const newsTask = keyword
-      ? fetchJYGNewsByCode(keyword, 10, 0).catch((e) => {
-          console.error('拼接韭研公社新闻失败:', e);
-          return [];
-        })
-      : Promise.resolve([]);
+    // 新闻附录：登录后用「资讯」栏四来源分类信息替代韭研该股新闻（与资讯视图同源切换），
+    // 未登录（或分类源为空）保留韭研公社该股新闻
+    const newsTask = (async () => {
+      if (hasXxjSession()) {
+        const groups = await fetchXxjNewsGroupsForAi();
+        const text = buildXxjNewsAppendix(groups);
+        if (text) return text;
+      }
+      if (!keyword) return '';
+      const items = await fetchJYGNewsByCode(keyword, 10, 0);
+      return buildJygNewsAppendix(keyword, items);
+    })().catch((e) => {
+      console.error('拼接个股新闻失败:', e);
+      return '';
+    });
 
+    // 资金附录：分时主力净流入 + 第三方量化结论 + 资金动态三块表格（后者需登录态，未登录返回 []）
     const moneyTask = (async () => {
-      const pair = await Promise.all([fetchStockMainFlow(moneyCode), fetchStockAnalysis(moneyCode)]);
-      return buildStockMoneyFlowAppendix(pair[0], pair[1]);
+      const trio = await Promise.all([
+        fetchStockMainFlow(moneyCode),
+        fetchStockAnalysis(moneyCode),
+        fetchStockFundTables(moneyCode, deps),
+      ]);
+      return buildStockMoneyFlowAppendix(trio[0], trio[1]) + buildStockFundTablesAppendix(trio[2]);
     })().catch((e) => {
       console.error('拼接资金与量化数据失败:', e);
       return '';
@@ -123,29 +144,12 @@ export class StockNewsView {
 
     const resolved = await Promise.all([tradeTask, newsTask, moneyTask]);
     const tradeData = resolved[0];
-    const items = resolved[1];
+    const newsAppendix = resolved[1];
     const moneyAppendix = resolved[2];
 
     let tradeDataAppendix = '';
     if (tradeData && tradeData.text) {
       tradeDataAppendix = `\n\n以下为${rangeLabel}的前复权日线数据（来自${tradeData.sourceLabel}）：\n${tradeData.text}`;
-    }
-
-    let newsAppendix = '';
-    if (Array.isArray(items) && items.length) {
-      const lines: string[] = [];
-      for (const item of items) {
-        const ts = item.create_time ? `[${item.create_time}] ` : '';
-        lines.push(`- ${ts}${item.title || ''}`);
-        if (item.warn_words) lines.push(`  - warn_words: ${item.warn_words}`);
-        const snippet = item.content
-          ? item.content.length > 300
-            ? item.content.slice(0, 300) + '…'
-            : item.content
-          : '';
-        if (snippet) lines.push(`  - content: ${snippet}`);
-      }
-      newsAppendix = `\n\n以下为韭研公社该股新闻（关键词：${keyword}）：\n${lines.join('\n')}`;
     }
 
     const message = baseMessage + tradeDataAppendix + newsAppendix + moneyAppendix;

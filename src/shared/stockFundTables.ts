@@ -90,4 +90,28 @@ export async function fetchStockFundTables(
   return normalizeFundTables(payload);
 }
 
-export default { fetchStockFundTables, normalizeFundTables };
+/**
+ * 三块资金表 → AI prompt 附录（纯函数）。
+ * 颜色对文本无意义，丢弃；脏块（无标题/无行）跳过；全空返回空串。
+ */
+export function buildStockFundTablesAppendix(tables: any): string {
+  if (!Array.isArray(tables) || !tables.length) return '';
+  const parts: string[] = [];
+  for (const t of tables) {
+    if (!t || typeof t.title !== 'string' || !t.title) continue;
+    if (!Array.isArray(t.rows) || !t.rows.length) continue;
+    const header = Array.isArray(t.columns) ? t.columns.filter(Boolean).join(' | ') : '';
+    const lines = t.rows
+      .map((r: FundTableRow) => (r && Array.isArray(r.cells) ? r.cells.join(' | ') : ''))
+      .filter(Boolean);
+    if (!lines.length) continue;
+    parts.push(`【${t.title}】${header ? `\n${header}` : ''}\n${lines.join('\n')}`);
+  }
+  if (!parts.length) return '';
+  return (
+    `\n\n以下为该股资金动态表格（主力分析/主力资金/明-暗盘，来自复利备忘录，需登录）：\n` +
+    parts.join('\n\n')
+  );
+}
+
+export default { fetchStockFundTables, normalizeFundTables, buildStockFundTablesAppendix };

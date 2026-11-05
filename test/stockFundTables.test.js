@@ -260,3 +260,38 @@ describe('个股资金三块表格 stockFundTables', () => {
     assert.strictEqual(called, false);
   });
 });
+
+describe('AI 资金表附录 buildStockFundTablesAppendix', () => {
+  it('三块表 → 【标题】+表头+行；空/脏输入返回空串', () => {
+    const tables = [
+      {
+        title: '主力分析',
+        columns: ['分析日', '主力成本(占比)', '排名', '得分'],
+        rows: [{ cells: ['2026-11-04', '53.56(38.74%)', '167', '77.24'], color: '#008000' }],
+      },
+      {
+        title: '主力资金',
+        columns: ['日期', '净流入', '累积', '资金评分'],
+        rows: [{ cells: ['2026-11-04', '2.24亿', '2.24亿', '0.00'], color: '#ff0000' }],
+      },
+    ];
+    const text = tablesModule.buildStockFundTablesAppendix(tables);
+    assert.ok(text.includes('【主力分析】'), text);
+    assert.ok(text.includes('分析日 | 主力成本(占比) | 排名 | 得分'), text);
+    assert.ok(text.includes('2026-11-04 | 53.56(38.74%) | 167 | 77.24'), text);
+    assert.ok(text.includes('【主力资金】'), text);
+    assert.ok(text.includes('资金动态表格'), '应标注为资金动态表格');
+    assert.strictEqual(tablesModule.buildStockFundTablesAppendix([]), '');
+    assert.strictEqual(tablesModule.buildStockFundTablesAppendix(null), '');
+  });
+
+  it('无行/无标题的脏块被跳过；全脏返回空串', () => {
+    assert.strictEqual(
+      tablesModule.buildStockFundTablesAppendix([
+        { title: '空块', columns: [], rows: [] },
+        { title: '', columns: ['a'], rows: [{ cells: ['x'], color: '' }] },
+      ]),
+      ''
+    );
+  });
+});

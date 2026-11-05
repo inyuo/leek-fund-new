@@ -299,3 +299,54 @@ describe('NewsProvider 两级树', () => {
     assert.strictEqual(children[0].command.command, 'leek-fund.refreshFollow');
   });
 });
+
+describe('AI 资讯附录 buildXxjNewsAppendix / fetchXxjNewsGroupsForAi', () => {
+  it('仅保留有条目的分组，按【标签】分组，条目为 [时间] 标题 —— 摘要', () => {
+    const groups = [
+      {
+        key: 'hot',
+        label: '热点快讯',
+        failed: false,
+        updatedAt: 0,
+        items: [
+          { id: 'h0', url: '', time: 0, timeLabel: '14:20', title: '半导体异动', summary: '板块大涨', stocksLabel: '', source: 'hot' },
+        ],
+      },
+      { key: 'global', label: '全球新闻', failed: false, updatedAt: 0, items: [] },
+    ];
+    const text = xxj.buildXxjNewsAppendix(groups);
+    assert.ok(text.includes('【热点快讯】'), text);
+    assert.ok(text.includes('[14:20] 半导体异动'), text);
+    assert.ok(text.includes('板块大涨'), text);
+    assert.ok(!text.includes('【全球新闻】'), '空分组不应出现');
+    assert.ok(text.includes('资讯」栏分类新闻'), '应标注来源为资讯栏分类信息');
+  });
+
+  it('空/异常输入返回空串', () => {
+    assert.strictEqual(xxj.buildXxjNewsAppendix([]), '');
+    assert.strictEqual(xxj.buildXxjNewsAppendix(null), '');
+    assert.strictEqual(
+      xxj.buildXxjNewsAppendix([{ key: 'hot', label: 'x', items: [], failed: false, updatedAt: 0 }]),
+      ''
+    );
+  });
+
+  it('未登录 fetchXxjNewsGroupsForAi 直接返回 []（不发请求）', async () => {
+    let calls = 0;
+    const groups = await xxj.fetchXxjNewsGroupsForAi(8, {
+      store: makeStore(null),
+      axios: { post: async () => { calls += 1; return ok([]); } },
+    });
+    assert.deepStrictEqual(groups, []);
+    assert.strictEqual(calls, 0, '未登录不应发请求');
+  });
+
+  it('登录后聚合四来源为分组', async () => {
+    const groups = await xxj.fetchXxjNewsGroupsForAi(8, {
+      store: makeStore(SESSION),
+      axios: { post: async () => ok([{ tmStr: '14:20', title: 'A', content: 'aa' }]) },
+    });
+    assert.strictEqual(groups.length, 4);
+    assert.strictEqual(groups[0].items[0].title, 'A');
+  });
+});

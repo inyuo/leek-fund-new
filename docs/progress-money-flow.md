@@ -377,3 +377,39 @@ Stock 视图（`leekFundView.stock`，name = `Stock`）点击个股 → `leek-fu
   （`1.0.<14 位时间戳>`）时，自动按 git 版本还原（只改 `version` 字段，其余字段不动），
   避免脏版本号进仓库。
 
+## 追加：AI 分析股票数据附录增强（2026-11-05）
+
+### 需求
+
+1. 新闻附录：登录后用「资讯」栏的分类信息**替代**韭研该股新闻。
+2. 修复此前记录的局限：数据附录未接入 `analy.get_sp` 三块资金表（主力分析/主力资金/明-暗盘）。
+
+### 落点（均为可单测的纯函数 + 薄编排）
+
+- `src/explorer/xxjwxcNews.ts`：新增 `fetchXxjNewsGroupsForAi(limitPerGroup, deps)`
+  （未登录直接 `[]` 不发请求，登录复用 `fetchXxjSource`+`buildXxjSourceGroups`）与
+  纯函数 `buildXxjNewsAppendix(groups)`（仅保留有条目的分组，`【标签】\n- [时间] 标题 —— 摘要`）。
+- `src/webview/jiuyangongshe-news.ts`：把原内联的韭研新闻拼装抽为纯函数 `buildJygNewsAppendix`。
+- `src/shared/stockFundTables.ts`：新增纯函数 `buildStockFundTablesAppendix(tables)`
+  （`【标题】+表头+行`，丢弃服务端 color，脏块跳过）。
+- `src/webview/stock-news-view.ts`：`send_ai_stock_analysis(target, deps?)`
+  - 新闻任务：`hasXxjSession()` 为真 → 四来源分类附录；空/未登录 → 回退韭研该股新闻（与资讯视图同源切换）。
+  - 资金任务：并入第三路 `fetchStockFundTables(moneyCode, deps)`，文本拼在量化结论之后。
+  - `baseMessage` 改为中性表述（不再点名韭研）。
+- `src/registerCommand.ts`：`aiStockAnalysis` 命令注入 `createVscodeStorage(context.globalState)`，
+  使 `ljgxPostAuth`（需显式 store）能拿到登录态。
+
+### 关键约束
+
+- `ljgxPostAuth` 无 `deps.store` 时**直接返回 null 不发请求**（与量价分层漏传 store 同一教训），
+  所以三块表必须经命令层注入 store。
+- 资讯四来源是**全市场分类流**（非按个股过滤），与资讯侧边栏所见一致，作为盘面背景喂给模型；
+  个股专属资金/行情仍由日线、`get_share_main`、`analy_code`、`get_sp` 四路提供。
+- 三路降级：任一失败只丢对应附录，绝不挂整个分析。
+
+### 验证
+
+`npx tsc -p ./` 0 error；eslint 0 error / 5 warning（既有基线）；排除外部搜狐 503 用例后
+全量单测 **238 passing / 0 failing**（新增：资讯附录 4 + 资金表附录 2 + 韭研附录 2）。
+模块加载冒烟：`send_ai_stock_analysis`/四个新函数在 vscode-mock 下均可用，未登录附录返回空串。
+

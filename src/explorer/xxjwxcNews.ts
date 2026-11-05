@@ -326,6 +326,43 @@ export function buildXxjSourceGroups(results: any, limitPerGroup = 20): NewsSour
   });
 }
 
+/**
+ * 登录后为 AI 分析聚合四来源分类资讯（与「资讯」视图同源）。
+ * 未登录直接返回 []（不发请求）；登录态经 deps 或全局 storage 解析。
+ */
+export async function fetchXxjNewsGroupsForAi(
+  limitPerGroup = 8,
+  deps?: { store?: LjgxStorage; axios?: any }
+): Promise<NewsSourceGroup[]> {
+  if (!hasXxjSession(deps)) return [];
+  const results: Record<string, any> = {};
+  const fetched = await Promise.all(NEWS_SOURCES.map((s) => fetchXxjSource(s.key, deps)));
+  NEWS_SOURCES.forEach((s, i) => {
+    results[s.key] = fetched[i];
+  });
+  return buildXxjSourceGroups(results, limitPerGroup);
+}
+
+/**
+ * 四来源分组 → AI prompt 附录（纯函数）。
+ * 仅保留有条目的分组；全部为空返回空串，让调用方回退到韭研源。
+ */
+export function buildXxjNewsAppendix(groups: any): string {
+  if (!Array.isArray(groups) || !groups.length) return '';
+  const sections: string[] = [];
+  for (const g of groups) {
+    if (!g || !Array.isArray(g.items) || !g.items.length) continue;
+    const lines = g.items.map((n: JYGNewsItem) => {
+      const time = n.timeLabel ? `[${n.timeLabel}] ` : '';
+      const summary = n.summary ? ` —— ${n.summary}` : '';
+      return `- ${time}${n.title}${summary}`;
+    });
+    sections.push(`【${g.label}】\n${lines.join('\n')}`);
+  }
+  if (!sections.length) return '';
+  return `\n\n以下为「资讯」栏分类新闻（来自复利备忘录，登录态）：\n${sections.join('\n\n')}`;
+}
+
 export default {
   hasXxjSession,
   initXxjNewsStorage,
@@ -336,4 +373,6 @@ export default {
   resolveNewsSourceUrl,
   fetchXxjSource,
   buildXxjSourceGroups,
+  fetchXxjNewsGroupsForAi,
+  buildXxjNewsAppendix,
 };

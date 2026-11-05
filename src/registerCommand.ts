@@ -346,7 +346,10 @@ export function registerViewEvent(
     commands.registerCommand('leek-fund.aiStockAnalysis', async (target) => {
       const { StockNewsView } = require('./webview/stock-news-view');
       const stockNewsView = StockNewsView.getInstance();
-      const result = await stockNewsView.send_ai_stock_analysis(target);
+      // 资金动态三块表格走需登录态的 analy.get_sp；登录态资讯源同理，注入会话存储
+      const result = await stockNewsView.send_ai_stock_analysis(target, {
+        store: createVscodeStorage(context.globalState),
+      });
       if (result !== '') {
         // 控制台输出 - 限制长度避免控制台截断
         // const consoleResult = result.length > 2000 ? result.substring(0, 2000) + '...（内容过长，完整结果请查看OUTPUT面板或Webview）' : result;

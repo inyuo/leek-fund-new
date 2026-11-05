@@ -283,11 +283,36 @@ export async function fetchJYGCommunityNews(
   return Array.isArray(list) ? list : [];
 }
 
+/**
+ * 韭研该股新闻 → AI prompt 附录（纯函数）。
+ * 未登录（或资讯源缺失）时的降级附录，与资讯视图 fetchList 的降级链路同源。
+ * 空/非数组返回空串，让调用方按「数据缺失」不追加该段。
+ */
+export function buildJygNewsAppendix(keyword: string, items: any): string {
+  if (!Array.isArray(items) || !items.length) return '';
+  const lines: string[] = [];
+  for (const item of items) {
+    if (!item) continue;
+    const ts = item.create_time ? `[${item.create_time}] ` : '';
+    lines.push(`- ${ts}${item.title || ''}`);
+    if (item.warn_words) lines.push(`  - warn_words: ${item.warn_words}`);
+    const snippet = item.content
+      ? item.content.length > 300
+        ? item.content.slice(0, 300) + '…'
+        : item.content
+      : '';
+    if (snippet) lines.push(`  - content: ${snippet}`);
+  }
+  if (!lines.length) return '';
+  return `\n\n以下为韭研公社该股新闻（关键词：${keyword}）：\n${lines.join('\n')}`;
+}
+
 export default {
   fetchJYGNewsByCode,
   fetchJYGCommunityNews,
   resolveJYGStock,
   buildJYGToken,
+  buildJygNewsAppendix,
 };
 
 export async function testJYGNews(stockCode: string = '贵州茅台', limit = 5, start = 0) {

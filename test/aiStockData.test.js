@@ -91,3 +91,24 @@ describe('韭研请求超时重试', () => {
     assert.deepStrictEqual(list, []);
   });
 });
+
+describe('韭研新闻附录 buildJygNewsAppendix', () => {
+  it('有条目 → 关键词标注 + 逐条 [时间] 标题 + warn_words/正文摘要', () => {
+    const { buildJygNewsAppendix } = require('../out/webview/jiuyangongshe-news');
+    const text = buildJygNewsAppendix('贵州茅台', [
+      { create_time: '2026-11-04 09:30:00', title: '公告A', content: 'x'.repeat(400), warn_words: '减持' },
+      { title: '公告B', content: '短内容' },
+    ]);
+    assert.ok(text.includes('韭研公社该股新闻（关键词：贵州茅台）'), text);
+    assert.ok(text.includes('[2026-11-04 09:30:00] 公告A'), text);
+    assert.ok(text.includes('warn_words: 减持'), text);
+    assert.ok(text.includes('…'), '超长正文应截断');
+    assert.ok(text.includes('公告B'), text);
+  });
+
+  it('空/非数组返回空串', () => {
+    const { buildJygNewsAppendix } = require('../out/webview/jiuyangongshe-news');
+    assert.strictEqual(buildJygNewsAppendix('x', []), '');
+    assert.strictEqual(buildJygNewsAppendix('x', null), '');
+  });
+});
