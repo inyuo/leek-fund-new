@@ -305,7 +305,7 @@ export interface LjgxFetchDeps {
  * validateStatus 恒 true（HTTP >= 400 归一为 null，不让 axios 抛）。
  * 返回 data.data 载荷（不可解析为 null），调用方只做字段归一化。
  */
-async function ljgxPostAuth(
+export async function ljgxPostAuth(
   path: string,
   body: Record<string, any>,
   deps?: LjgxFetchDeps

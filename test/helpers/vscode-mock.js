@@ -47,4 +47,22 @@ class Uri {
 /** 与 vscode ViewColumn 同形（面板宿主测试只用到 One） */
 const ViewColumn = { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9 };
 
-module.exports = { TreeItem, EventEmitter, ThemeIcon, Uri, TreeItemCollapsibleState, ViewColumn };
+/** 记录宿主转发的命令（策略选股行「资金动态」） */
+const commandCalls = [];
+const commands = {
+  executeCommand(name, ...args) {
+    commandCalls.push({ name, args });
+    return Promise.resolve();
+  },
+};
+
+module.exports = {
+  TreeItem,
+  EventEmitter,
+  ThemeIcon,
+  Uri,
+  TreeItemCollapsibleState,
+  ViewColumn,
+  commands,
+  commandCalls,
+};
