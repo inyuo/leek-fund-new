@@ -295,13 +295,16 @@ export function registerViewEvent(
   // 资金动态（个股资金三块表格 / 分时资金流 / 行业资金流）
   context.subscriptions.push(
     commands.registerCommand('leek-fund.viewStockFundFlow', () => {
-      const { stockFundFlow } = require('./webview/stockFundFlow');
+      const { initStockFundFlow, stockFundFlow } = require('./webview/stockFundFlow');
+      // 三块表格走需登录态的 analy.get_sp，开面板前注入会话存储
+      initStockFundFlow(createVscodeStorage(context.globalState));
       stockFundFlow();
     })
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.stockFundFlowForStock', (target) => {
-      const { stockFundFlow } = require('./webview/stockFundFlow');
+      const { initStockFundFlow, stockFundFlow } = require('./webview/stockFundFlow');
+      initStockFundFlow(createVscodeStorage(context.globalState));
       const code = (target && (target.id || (target.info && target.info.code))) || '';
       stockFundFlow(typeof code === 'string' ? code : '');
     })
