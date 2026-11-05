@@ -189,3 +189,191 @@
 - 起始 **103 passing** → 最终 **155 passing**（+52：数据层/监听器/树视图/登录/面板逐任务递增 118→123→130→134→143→147→155）。
 - `yarn compile`（tsc）0 error；`npx eslint src --ext ts` 0 error / 5 warning（既有基线，无新增）。
 
+## 追加：策略选股（2026-11-04）
+
+用户确认的展示形态：**并入 `template/quant.html` 作为第 4 个 tab**，不新增面板、命令与 view 贡献点。
+
+### 官网契约（前端 chunk 解析 + 无 token 直连实测）
+
+- 9 类策略（`lq=cd/qs/dwfl/szx/ztb/cx/hy/jzc/fk`）**共用一个接口**：
+  `POST /shares/get_lq {tag, days}`；无 token 实测返回 `{state:false, code:1018, error:"缓存已过期，请刷新重试"}`，
+  即必须登录，可直接复用 `ljgxPostAuth` 的 1018 清会话降级层。
+- 响应 `data = {list, hyTags, tsTags}`，`list` 为两级分组（每组内含 `list`，行带 `code`）；
+  `tsTags` 为 `{doc,url}` 标签条，`hyTags` 官网返回但未渲染。
+- `days` 为官网 `titleUtils.dayChoice` 的 8 档：近 1/3/5/10/20/30/60/100 天。
+- 官网 `lqMap` 还有另外 9 类（主力监控、武松打板等），本轮未接，`LQ_TAGS` 留扩展位。
+
+### 落点
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 数据层 | `src/shared/lqData.ts`（新增） | `LQ_TAGS`/`LQ_DAYS` 元数据、`fetchLqList`、`normalizeLqGroups` 防御式归一（行字段待登录后真机钉死） |
+| 复用 | `src/shared/ljgxData.ts` | 导出 `ljgxPostAuth`，不重复实现鉴权 POST |
+| 模板 | `template/quant.html` | 第 4 tab DOM 表格、9 chips + 8 档天数、分组折叠行、未登录/加载/失败占位；渲染分发改显式分支；补 `resize` 监听 |
+| 宿主 | `src/webview/quantPanel.ts` | lq 懒加载、按 `tag+days` 的 30min 缓存与在途合并、`selectLqTag`/`selectLqDays`/`openStock` 消息、`quantPanel(...,tag)` |
+| 树/命令 | `src/explorer/quantProvider.ts`、`src/registerCommand.ts` | 已登录新增「策略选股」面板入口；`leek-fund.quantOpen` 放行 `lq` 并透传 `tag` |
+
+`lq` 行「资金动态」复用 `leek-fund.stockFundFlowForStock {id: code}`；`tsTags` 只展示文本、不跳外链。
+
+### 验证与待办
+
+- 新增 21 条用例（数据层 9 / 模板 5 / 宿主 5 / 树视图 2），并修掉上一批遗留的
+  `resize 触发当前 Tab 重画` 红灯。
+- `npx tsc -p ./` 0 error；`npx eslint src --ext ts` 0 error / 5 warning（既有基线）；
+  排除外部网络用例后全量 **188 passing / 0 failing**。
+- `yarn test:unit` 全量仍有 1 个失败：`test/aiStockData.test.js` 的搜狐 JSONP 用例
+  返回 HTTP 503（单独跑该文件同样 503），属第三方接口不可用，与本轮改动无关。
+- **待办**：登录后真机逐 tag 核对分组标题与行字段（当前归一化为防御式解析）；
+  登录成功后面板仍需手动点刷新（与现有 cjl 一致）。
+
+## 追加：资讯按来源分组（2026-11-04，方案 A）
+
+用户确认的展示形态：侧边栏 `leekFundView.news` 从扁平混排改为**两级树**（4 个来源分组 + 组内条目），不新增 webview/命令/view 贡献点。
+
+### 官网契约（pages/news/news 的 segmentedList + 子页 chunk 解析）
+
+| 分段（官网 / 用户叫法） | 子页 | 接口与请求体 |
+|---|---|---|
+| 热点异动 `rdyd` / 热点快讯 | `pages/article/jdkp` | `POST /shares.get_glh_tm {start:'',end:''}` |
+| 今日快讯 `mrkx` | `pages/article/hejjw` | `POST /shares.get_hejjw {dayStr:''}` |
+| 全球新闻 `rdkp` | `pages/article/xzw` | `POST /shares.get_xzw {start:'',end:'',tag:''}` |
+| 投资日历 `tzrl` | `pages/article/tzrl` | `POST /shares.get_xzw {start:'',end:'',tag:'1'}`（同接口靠 tag 分流） |
+
+原 `xxjwxcNews.ts` 只接了 `get_hejjw`/`get_xzw` 且一律传 `{}`，投资日历那一类根本没取；四来源均需登录（`user-token`，1018 降级）。行字段以登录后真机为准，归一化层做防御式解析。
+
+### 落点
+
+- `src/explorer/xxjwxcNews.ts`：`NEWS_SOURCES` 元数据（endpoint/body/pageUrl/ttlMs）、`resolveNewsSourceUrl`、带 body 的 `xxjNewsPost`、`fetchXxjSource`（失败返回 `null`、未登录/无数据返回 `[]`）、`buildXxjSourceGroups`。
+- `src/explorer/jygNews.ts`：`JYGNewsItem` 增加可选 `source`。
+- `src/explorer/newsService.ts`：`getNewsGroups` 四源并发 + 按来源分级 TTL（快讯 30s / 新闻·日历 5min）、失败源单独标记、`NewsSourceGroupTreeItem`；旧 `getNewsList` 三层降级链路保留给未登录。
+- `src/explorer/newsProvider.ts`：两级 `getChildren`，失败/空分组给可点击重试的占位节点。
+- `src/registerCommand.ts`：`newItemClick` 按 `source` 打开对应官网子页。
+- `src/extension.ts`：可见时 30s 轮询由 `refresh(true)` 改为 `refresh(false)`，避免绕过分级 TTL 每 30s 全量打 4 个接口；手动「刷新资讯」仍强制全量。
+
+### 验证与待办
+
+- 新增 `test/newsSources.test.js` 17 条（元数据/请求体/降级/分组归一/分级缓存/两级树/URL 分流）；
+  `npx tsc -p ./` 0 error、`eslint` 0 error / 5 warning（既有基线）、排除外部网络 503 用例后全量 **205 passing**。
+- **待办**：登录后真机核对四来源返回的分组标题、行字段与 `tag` 取值；单来源精确重试目前复用全量
+  `leek-fund.refreshFollow`（未做按 key 的单独刷新命令）。
+
+## 追加：掘金树精简 + 量价分层修复（2026-11-04）
+
+### 树精简（用户确认：单入口默认 north）
+
+- 移除侧边栏「掘金」里的明盘/暗盘资金榜（原 `POST /shares.get_dark_buy {days:2,tag:'all'}`，
+  100 行 `darkRow`）与 4 个重复的 tab 入口；树现在只有
+  `[微信扫码登录 或 用户名, 打开量化面板]`。面板内 4 个 tab 全部保留，进去后自行切换。
+- `src/explorer/quantProvider.ts`：删除 `darkSpecs` / `darkRowSpec` / `DARK_TTL_MS` /
+  `isSameDay` / `doFetchDarkBuy` 与榜单缓存字段；`QuantState` 只剩 `session/sessionValid`；
+  `refreshData()` 语义改为「重新校验会话 + 重绘」（`leek-fund.refreshQuant` 命令与
+  `package.json` 贡献点不变）。数据层 `fetchDarkBuy` 保留但不再有调用方。
+- `test/quantTree.test.js` 重写为 10 条（节点编排 5 + Provider 会话 TTL 5）。
+
+### 量价分层恒定「数据加载失败」的根因与修复
+
+- 根因：`src/webview/quantPanel.ts` 的 cjl 分支调用 `fetchShareCjl(cjlCodes())` **漏传 `deps`**；
+  `ljgxPostAuth` 在拿不到 `store` 时直接 `return null`（不发请求、不打日志），
+  模板收到 `cjl: null` 且 `cjlUnlogged: false` 就渲染失败占位，点重试走同一路径故永远无效。
+  最小复现：不传 deps → `null`；传 `{store}` → 返回真实 `{tm, price[]}`。
+  这是既有 bug（`HEAD` 版本同样），之前真机 e2e 是 node 直连数据层并显式传 store，没走宿主 UI。
+- 修复：改为 `fetchShareCjl(cjlCodes(), { store: panelStore || undefined })`；
+  `test/helpers/stubLjgxViewData.js` 记录 deps，`test/quantPanelView.test.js` 新增 1 条断言
+  「已登录 cjl → fetchShareCjl 收到 {store}」的回归用例。
+- 其余授权接口（`fetchLqList`、provider 原 `fetchDarkBuy`）本来就传了 store，不受影响。
+
+### 验证
+
+`npx tsc -p ./` 0 error；`npx eslint src --ext ts` 0 error / 5 warning（既有基线）；
+排除外部搜狐 503 用例后全量单测 **204 passing / 0 failing**。
+
+## 追加：资金动态页面替换为官网个股三块（2026-11-05）
+
+### 官网契约（用户截图确认）
+
+- `#/pages/add/add?scode=sz000977&tag=daily` 的「资金动态」tab = `StockInfoFund` 组件，
+  服务端下发的表格区为三块：**主力分析 / 主力资金 / 明-暗盘**。
+- 三块共用 `POST /analy.get_sp {code}`（`GetSp1` → `GetReturn`），返回 `data.list`：
+  每项 `{title, d1..d4（4 列表头）, list:[{d1..d4, color}]}`。截图表头依次为
+  `分析日/主力成本(占比)/排名/得分`、`日期/净流入/累积/资金评分`、
+  `日期/暗盘/明盘/净流入`；行颜色由服务端 `color` 给出（红涨绿跌）。
+- 该接口**需 user-token**：未登录实测 `{"state":false,"code":1018,"error":"缓存已过期，请刷新重试"}`。
+  注意这里的「明/暗盘」是个股历史日频表格，**不是**量价掘金页的
+  `POST /shares.get_dark_buy`「暗/明盘资金榜」（全市场榜单），两者不要混用。
+- 页面另有 `analy.get_share_main`（主力净流入图）、`analy.get_share_cjl`（成交额对比）、
+  `shares.get_hk_market_kline`（港股多空博弈），按用户确认的范围**不接入**。
+- **登录态实测（IDE 已登录）**：用 `globalState` 里的 `leek-fund.ljgxSession` 带
+  `user-token` 请求 `sz000977`，`state:true`，`data.list` 有 **13 块** —— 前三块正是
+  主力分析 / 主力资金 / 明/暗盘，后面还有违规记录、分红配送、业绩预告、增减持、
+  高管增减持、计划回购、大宗交易、近期龙虎榜、近期游资榜、名人分析。
+  每块字段为 `{title,d1..d4,isDot,list:[{d1..d4,color}]}`，行色为
+  `#ff0000` / `#1AAD19` / `#000000`。因此 `normalizeFundTables` **必须按标题白名单
+  过滤并按固定顺序输出三块**，否则左栏会渲染 13 张表。
+
+### 落点
+
+- 位置：替换 `template/stock-fund-flow.html` 左栏「自选股 · 当日主力净流入」。
+  三块**跟随当前选中个股**（走 `detail` 通道），**未登录整块不显示**（不放占位/引导）。
+  顶栏新增紧凑股票下拉，保留面板内切换个股的能力。
+- `src/shared/stockFundTables.ts`（新增）：`fetchStockFundTables(code, deps)` 复用
+  `ljgxPostAuth('analy.get_sp', {code}, deps)`；`normalizeFundTables` 防御式归一，
+  过滤无标题/无行脏块、最多 20 行、color 白名单防注入。未登录/1018/失败一律 `[]`。
+- `src/shared/fundFlowData.ts`：`StockDetail` 增 `fundTables`；`loadStockDetail(code, deps)`
+  第 4 路并发取数，单源失败只丢该字段。
+- `src/webview/stockFundFlow.ts`：`initStockFundFlow(store)` 注入登录态，
+  `pushDetail` 传 `{store}`；`src/registerCommand.ts` 两个资金动态命令入口注入
+  `createVscodeStorage(context.globalState)`。
+- 模板：删 `renderStocks`/`#stockList`/`stockCount`，新增 `renderStockSelect` 与
+  `renderFundTables`（4 列表格 + 服务端行色）；`init` 只渲染下拉，`detail` 渲染三块。
+
+### 验证
+
+`npx tsc -p ./` 0 error；`npx eslint src --ext ts` 0 error / 5 warning（既有基线）；
+排除外部搜狐 503 用例后全量单测 **218 passing / 0 failing**（新增
+`test/stockFundTables.test.js` 10 条、`test/stockFundFlowView.test.js` 6 条、
+`test/stockFundFlowHost.test.js` 2 条）。
+
+### 真机实测已核对（IDE 已登录）
+
+用 IDE `globalState` 会话实测 `analy.get_sp` 成功，字段与 bundle 推断一致；
+据此修正了「13 块全渲染」的偏差：`normalizeFundTables` 现在按标题白名单只输出
+`主力分析 / 主力资金 / 明（/ 或 \）暗盘` 三块并固定顺序，标题分隔符做了归一。
+剩余只待在插件窗口里肉眼确认左栏表格排版与行色（数据链路已验证）。
+
+## 追加：股票实时走势面板顶部工具条跳转资金动态（2026-11-05）
+
+### 入口链路
+
+Stock 视图（`leekFundView.stock`，name = `Stock`）点击个股 → `leek-fund.stockItemClick`
+→ `src/webview/stockTrend.ts` 的「股票实时走势」面板（内嵌东财 h5chart iframe）。
+该面板原先没有任何插件自己的入口，现顶部工具条加「资金动态」按钮。
+
+### 落点
+
+- `src/webview/stockTrend.ts`
+  - `canOpenFundFlow(stockCode)`：仅 `sh`/`sz` + 6 位且排除 `sh000`/`sz399`；
+    港股（`hk…`）、美股（`gb_`/`usr_…`）、期货（`nf_`/`hf_…`）、指数不显示按钮
+    （资金动态三块走 `analy.get_sp`，只支持 A 股个股）。
+  - 顶部 sticky 工具条 + `#fundFlowBtn`，点击 `postMessage({command:'openFundFlow', code})`。
+  - 宿主 `webview.onDidReceiveMessage` 执行 `leek-fund.stockFundFlowForStock`，
+    参数 `{ id: stockCode }`（已是 `sh600519` 形式，无需代码归一）；该命令内部会
+    `initStockFundFlow(store)` 注入登录态，三块表格能取到数据。
+  - 面板由 `ReusedWebviewPanel` 复用，消息监听用 `webview.__leekFundFlowBound`
+    标记只注册一次，避免反复打开累积监听导致一次点击多次跳转。
+  - 按钮用中性灰底白字：页面整体带 `invert(100%)` 反色滤镜，中性色反色后仍可读。
+- `test/stockTrendPanel.test.js`（新增 4 条）+ 依赖桩
+  `stubProxyConfig` / `stubGlobalState` / `stubStockTrendPic`。
+
+### 验证
+
+`npx tsc -p ./` 0 error；eslint 0 error / 5 warning（既有基线）；
+排除外部搜狐 503 用例后全量单测 **222 passing / 0 failing**。
+
+### 打包脚本健壮性（顺带修复）
+
+- `isValidZip()`：产物不是完整 zip（打包被中断留下的半成品）时报错退出并**保留历史包**，
+  不用坏包覆盖可用包。
+- `readOriginalPackageBytes()`：检测到 `package.json` 残留上次被打断的临时版本号
+  （`1.0.<14 位时间戳>`）时，自动按 git 版本还原（只改 `version` 字段，其余字段不动），
+  避免脏版本号进仓库。
+
