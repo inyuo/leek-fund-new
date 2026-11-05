@@ -51,6 +51,13 @@ function makeCtx2d() {
 }
 
 /** 一个可被模板脚本读写的元素桩 */
+/** 模块级画布尺寸（测试可切换，模拟 webview 布局未完成时 rect 为 0 的场景） */
+let RECT = { width: 800, height: 300, left: 0, top: 0 };
+
+function setRect(width, height) {
+  RECT = { width, height, left: 0, top: 0 };
+}
+
 function makeElement(id) {
   return {
     id,
@@ -74,7 +81,7 @@ function makeElement(id) {
       return [];
     },
     getBoundingClientRect() {
-      return { width: 800, height: 300, left: 0, top: 0 };
+      return RECT;
     },
     // canvas：同一个元素重复 getContext 返回同一桩（真实规范语义）
     _ctx: null,
@@ -150,4 +157,4 @@ function loadTemplate(templateName) {
   };
 }
 
-module.exports = { loadTemplate, makeElement, makeCtx2d };
+module.exports = { loadTemplate, makeElement, makeCtx2d, setRect };

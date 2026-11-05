@@ -105,49 +105,46 @@
         min-height: 0;
       }
 
-      /* ---------- A 自选股列表 ---------- */
-      .stock-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
-        align-items: center;
-        padding: 7px 10px;
-        cursor: pointer;
-        border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.15));
+      /* ---------- 顶栏股票切换 ---------- */
+      .stock-select {
+        max-width: 190px;
+        padding: 3px 6px;
+        font-size: 11px;
+        color: var(--vscode-foreground, #ccc);
+        background: var(--vscode-input-background, #313131);
+        border: 1px solid var(--vscode-input-border, #555);
+        border-radius: 3px;
       }
-      .stock-row:hover {
-        background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+
+      /* ---------- 个股资金三块表格 ---------- */
+      .fund-block {
+        margin-bottom: 16px;
       }
-      .stock-row.active {
-        background: var(--vscode-list-activeSelectionBackground, #094771);
-        color: var(--vscode-list-activeSelectionForeground, #fff);
+      .fund-title {
+        font-size: 13px;
+        font-weight: 700;
+        padding-left: 8px;
+        margin: 4px 0 8px;
+        border-left: 3px solid #aa00ff;
       }
-      .stock-row .code {
-        font-size: 12px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+      .fund-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+        font-family: var(--vscode-editor-font-family, monospace);
       }
-      .stock-row .code .nm {
+      .fund-table th {
+        padding: 6px 4px;
+        text-align: center;
         font-weight: 600;
-        margin-right: 6px;
+        background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.12));
+        border-bottom: 1px solid var(--vscode-panel-border, #444);
       }
-      .stock-row .code .cid {
-        font-family: var(--vscode-editor-font-family, monospace);
-        font-size: 11px;
-        font-weight: 400;
-        color: var(--vscode-descriptionForeground, #999);
-      }
-      .stock-row .net {
-        font-family: var(--vscode-editor-font-family, monospace);
-        font-size: 12px;
-        text-align: right;
+      .fund-table td {
+        padding: 6px 4px;
+        text-align: center;
         white-space: nowrap;
-      }
-      .stock-row .sub {
-        grid-column: 1 / -1;
-        font-size: 11px;
-        color: var(--vscode-descriptionForeground, #999);
+        border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128, 128, 128, 0.15));
       }
 
       /* ---------- 详情 ---------- */
@@ -314,6 +311,7 @@
   <body>
     <div class="topbar">
       <h1>资金动态</h1>
+      <select class="stock-select" id="stockSelect" aria-label="切换股票"></select>
       <span class="meta" id="updatedAt">加载中…</span>
       <span class="status" id="status"></span>
       <span class="spacer"></span>
@@ -321,12 +319,10 @@
     </div>
 
     <div class="layout">
-      <!-- 粒度 A：每只自选股当日主力净流入 -->
-      <section class="panel">
-        <header>自选股 · 当日主力净流入 <span class="hint" id="stockCount"></span></header>
-        <div class="body" id="stockList">
-          <div class="empty">正在加载自选股资金流…</div>
-        </div>
+      <!-- 个股资金三块：主力分析 / 主力资金 / 明-暗盘（未登录时整块隐藏） -->
+      <section class="panel" id="fundPanel" style="display: none">
+        <header>资金动态 <span class="hint" id="fundHint"></span></header>
+        <div class="body" id="fundTables"></div>
       </section>
 
       <div style="display: flex; flex-direction: column; min-width: 0; min-height: 0">
@@ -445,62 +441,70 @@
           el.className = 'status' + (isError ? ' error' : '');
         }
 
-        /* ================= 粒度 A：自选股列表 ================= */
-        function renderStocks(data) {
+        /* ================= 顶栏股票下拉 ================= */
+        function renderStockSelect(data) {
           stockRows = (data && data.stocks) || [];
-          var total = data && typeof data.total === 'number' ? data.total : 0;
-          var nonA = total - stockRows.length;
-          $('stockCount').textContent = stockRows.length
-            ? stockRows.length + ' 只 A 股'
-            : '';
-
-          var box = $('stockList');
-          if (!stockRows.length) {
-            box.innerHTML =
-              '<div class="empty">自选股中没有 A 股代码' +
-              (total ? '<br />共 ' + total + ' 只，非 A 股已跳过' : '') +
-              '<br />在自选股里添加 sh600519 这类代码后刷新</div>';
-            return;
-          }
-
           var html = '';
           for (var i = 0; i < stockRows.length; i++) {
             var r = stockRows[i];
-            var cls = signClass(r.mainNet);
-            var active = r.code === selectedCode ? ' active' : '';
-            // 名称为主、代码为辅；名称缺失时只显示代码
-            var label = r.name
-              ? '<span class="nm">' + escapeHtml(r.name) + '</span><span class="cid">' + escapeHtml(r.code) + '</span>'
-              : '<span class="cid">' + escapeHtml(r.code) + '</span>';
+            var label = r.name ? r.name + ' ' + r.code : r.code;
             html +=
-              '<div class="stock-row' +
-              active +
-              '" data-code="' +
+              '<option value="' +
               escapeHtml(r.code) +
               '">' +
-              '<span class="code">' +
-              label +
-              '</span>' +
-              '<span class="net ' +
-              cls +
-              '">' +
-              fmtAmount(r.mainNet) +
-              '</span>' +
-              (r.tm
-                ? '<span class="sub">数据日期 ' + escapeHtml(r.tm) + '</span>'
-                : r.source === 'east'
-                ? '<span class="sub">备用数据源 · 仅当日累计（无分时曲线）</span>'
-                : '<span class="sub">主力资金数据暂缺</span>') +
-              '</div>';
+              escapeHtml(label) +
+              '</option>';
+          }
+          $('stockSelect').innerHTML = html;
+          if (selectedCode) $('stockSelect').value = selectedCode;
+        }
+
+        /** 行颜色只接受颜色字面量，挡掉服务端脏值注入 */
+        function safeColor(c) {
+          return /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20})$/.test(c || '') ? c : '';
+        }
+
+        /* ================= 个股资金三块（跟随选中个股） ================= */
+        function renderFundTables(tables) {
+          var panel = $('fundPanel');
+          var box = $('fundTables');
+          var list = Array.isArray(tables) ? tables : [];
+          // 未登录 / 接口失败：整块不显示，也不放登录引导占位
+          if (!list.length) {
+            box.innerHTML = '';
+            panel.style.display = 'none';
+            $('fundHint').textContent = '';
+            return;
+          }
+
+          panel.style.display = '';
+          $('fundHint').textContent = list.length + ' 项';
+          var html = '';
+          for (var i = 0; i < list.length; i++) {
+            var t = list[i];
+            var cols = Array.isArray(t.columns) ? t.columns : [];
+            var rows = Array.isArray(t.rows) ? t.rows : [];
+            html +=
+              '<div class="fund-block"><div class="fund-title">' +
+              escapeHtml(t.title) +
+              ':</div><table class="fund-table"><thead><tr>';
+            for (var c = 0; c < 4; c++) {
+              html += '<th>' + escapeHtml(cols[c]) + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            for (var r = 0; r < rows.length; r++) {
+              var row = rows[r];
+              var cells = Array.isArray(row.cells) ? row.cells : [];
+              var color = safeColor(row.color);
+              html += '<tr' + (color ? ' style="color:' + color + '"' : '') + '>';
+              for (var d = 0; d < 4; d++) {
+                html += '<td>' + escapeHtml(cells[d]) + '</td>';
+              }
+              html += '</tr>';
+            }
+            html += '</tbody></table></div>';
           }
           box.innerHTML = html;
-
-          var rows = box.querySelectorAll('.stock-row');
-          for (var j = 0; j < rows.length; j++) {
-            rows[j].addEventListener('click', function () {
-              selectStock(this.getAttribute('data-code'));
-            });
-          }
         }
 
         /* ================= 粒度 D：行业排名 ================= */
@@ -912,12 +916,11 @@
           if (!code) return;
           selectedCode = code;
           vscode.setState({ selectedCode: code });
+          $('stockSelect').value = code;
 
-          var rows = document.querySelectorAll('.stock-row');
-          for (var i = 0; i < rows.length; i++) {
-            rows[i].className =
-              'stock-row' + (rows[i].getAttribute('data-code') === code ? ' active' : '');
-          }
+          // 三块表格跟随个股重拉，等 detail 回来再决定是否显示
+          $('fundTables').innerHTML = '';
+          $('fundPanel').style.display = 'none';
 
           $('detailHint').textContent = '加载中…';
           $('analysisBox').innerHTML = '<div class="empty">加载中…</div>';
@@ -952,7 +955,7 @@
               selectedCode = msg.data.initialCode;
               vscode.setState({ selectedCode: selectedCode });
             }
-            renderStocks(msg.data);
+            renderStockSelect(msg.data);
             renderIndustry(msg.data);
             var ts = msg.data && msg.data.updatedAt;
             $('updatedAt').textContent = ts
@@ -962,6 +965,7 @@
           } else if (msg.type === 'detail') {
             setStatus('');
             renderDetail(msg.data || {});
+            renderFundTables(msg.data && msg.data.fundTables);
           }
         });
 
@@ -969,7 +973,8 @@
           var btn = $('refreshBtn');
           btn.disabled = true;
           setStatus('刷新中…');
-          $('stockList').innerHTML = '<div class="empty">正在加载自选股资金流…</div>';
+          $('fundTables').innerHTML = '';
+          $('fundPanel').style.display = 'none';
           $('industryList').innerHTML = '<div class="empty">正在加载行业资金流…</div>';
           vscode.postMessage({ command: 'refresh' });
           setTimeout(function () {
@@ -979,6 +984,10 @@
 
         window.addEventListener('resize', function () {
           if (currentFlow) drawChart();
+        });
+
+        $('stockSelect').addEventListener('change', function () {
+          selectStock($('stockSelect').value);
         });
 
         bindChartHover();

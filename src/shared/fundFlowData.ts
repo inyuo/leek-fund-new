@@ -19,6 +19,8 @@ import {
 } from './xxjwxcData';
 import { fetchEastIndustryFlow, fetchEastStockMainFlow, toSecid } from './emMoneyFlow';
 import { fetchStockNames } from './tencentStock';
+import { LjgxFetchDeps } from './ljgxData';
+import { FundTable, fetchStockFundTables } from './stockFundTables';
 import { mapLimit } from './utils';
 
 /** 逐股取数并发上限：第三方接口短时高并发会触发反爬（实测东财被封） */
@@ -62,7 +64,10 @@ export interface SectorRow {
   percent: number;
 }
 
-/** 选中股详情：粒 B 的分时曲线 + 粒度 C 的所属板块 + 第三方分析结论 */
+/**
+ * 选中股详情：分时曲线 + 所属板块 + 第三方分析 + 个股资金三块表格。
+ * fundTables 需登录态，未登录/失败为空数组（模板据此隐藏左栏）。
+ */
 export interface StockDetail {
   code: string;
   name: string;
@@ -74,6 +79,8 @@ export interface StockDetail {
   /** 第三方量化分析（结构化分组，供窗口按卡片渲染） */
   analysis: AnalysisGroup[];
   sectors: SectorRow[];
+  /** 官网资金动态三块：主力分析 / 主力资金 / 明-暗盘 */
+  fundTables: FundTable[];
 }
 
 /**
@@ -192,7 +199,7 @@ export async function loadIndustryRows(): Promise<IndustryRow[]> {
  * 三个子请求并发且各自 catch —— 任一失败只丢该字段，
  * 其余照常返回（教训：韭研超时被静默吞掉时，模型只能回答"无法实时抓取"）。
  */
-export async function loadStockDetail(code: any): Promise<StockDetail> {
+export async function loadStockDetail(code: any, deps?: LjgxFetchDeps): Promise<StockDetail> {
   const safeCode = typeof code === 'string' ? code : '';
   const empty: StockDetail = {
     code: safeCode,
@@ -202,6 +209,7 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
     mainFlow: null,
     analysis: [],
     sectors: [],
+    fundTables: [],
   };
 
   if (!isAShareCode(safeCode)) return empty;
@@ -219,10 +227,15 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
       console.error('[资金动态] 取分析结论失败', errMsg(e));
       return [];
     }),
+    fetchStockFundTables(safeCode, deps).catch((e) => {
+      console.error('[资金动态] 取个股资金三块表格失败', errMsg(e));
+      return [] as FundTable[];
+    }),
   ]);
   const flow = pair[0];
   const quote = pair[1];
   const analysis = pair[2];
+  const fundTables = pair[3];
 
   let sectors: SectorRow[] = [];
   if (quote && Array.isArray(quote.hy)) {
@@ -239,6 +252,7 @@ export async function loadStockDetail(code: any): Promise<StockDetail> {
     mainFlow: flow,
     analysis: Array.isArray(analysis) ? analysis : [],
     sectors,
+    fundTables: Array.isArray(fundTables) ? fundTables : [],
   };
 }
 

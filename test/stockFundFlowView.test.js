@@ -1,14 +1,16 @@
 /**
  * 资金动态窗口模板行为测试（伪 DOM 执行内联 script）：
- * 1) 左侧自选股列表显示股票名称（name 字段透传渲染）
- * 2) 第三方量化分析按分组卡片渲染（结构化 {name, msgs[]}）
+ * 1) 左栏三块资金表格（主力分析 / 主力资金 / 明-暗盘）跟随选中个股渲染
+ * 2) 未登录（fundTables 为空）时左栏整块不显示
+ * 3) 顶栏股票下拉仍可切换个股
+ * 4) 第三方量化分析按分组卡片渲染
  *
  * 模板是纯字符串拼接渲染，没有 DOM 依赖，用轻量桩即可断言 innerHTML。
  */
 const assert = require('assert');
 const { loadTemplate } = require('./helpers/webview-dom');
 
-/** init 数据：粒度 A 列表 + 粒度 D 行业 */
+/** init 数据：股票下拉 + 行业列表 */
 function initData(stocks) {
   return {
     type: 'init',
@@ -22,8 +24,84 @@ function initData(stocks) {
   };
 }
 
+function detailData(fundTables) {
+  return {
+    type: 'detail',
+    data: {
+      code: 'sz000977',
+      name: '浪潮信息',
+      price: 57.35,
+      percent: 2.87,
+      mainFlow: null,
+      analysis: [],
+      sectors: [],
+      fundTables,
+    },
+  };
+}
+
+const TABLES = [
+  {
+    title: '主力分析',
+    columns: ['分析日', '主力成本(占比)', '排名', '得分'],
+    rows: [{ cells: ['2026-11-04', '53.56(38.74%)', '167(-809)', '77.24'], color: '#008000' }],
+  },
+  {
+    title: '主力资金',
+    columns: ['日期', '净流入', '累积', '资金评分'],
+    rows: [{ cells: ['2026-11-04', '2.24亿', '2.24亿', '0.00'], color: '#ff0000' }],
+  },
+  {
+    title: '明/暗盘',
+    columns: ['日期', '暗盘', '明盘', '净流入'],
+    rows: [{ cells: ['2026-11-04', '3.28亿', '2.23亿', '5.51亿'], color: '#ff0000' }],
+  },
+];
+
 describe('资金动态模板 stock-fund-flow.html', () => {
-  it('左侧列表显示股票名称与代码', () => {
+  it('左栏渲染三块资金表格：标题、表头、行值与颜色', () => {
+    const page = loadTemplate('stock-fund-flow.html');
+    page.fire('message', { data: detailData(TABLES) });
+
+    const html = page.el('fundTables').innerHTML;
+    assert.ok(html.includes('主力分析'), `应渲染第一块标题，实际：${html.slice(0, 200)}`);
+    assert.ok(html.includes('主力资金'), '应渲染第二块标题');
+    assert.ok(html.includes('明/暗盘'), '应渲染第三块标题');
+    assert.ok(html.includes('主力成本(占比)'), '应渲染 4 列表头');
+    assert.ok(html.includes('53.56(38.74%)'), '应渲染行值');
+    assert.ok(html.includes('5.51亿'), '应渲染明暗盘净流入');
+    assert.ok(html.includes('#ff0000'), '行颜色应透传');
+    assert.strictEqual(page.el('fundPanel').style.display, '', '有数据时左栏可见');
+  });
+
+  it('未登录（fundTables 为空）时左栏整块不显示', () => {
+    const page = loadTemplate('stock-fund-flow.html');
+    page.fire('message', { data: detailData([]) });
+
+    assert.strictEqual(page.el('fundPanel').style.display, 'none');
+    assert.strictEqual(page.el('fundTables').innerHTML, '', '不显示登录引导或空态占位');
+  });
+
+  it('表格字段转义，不出现 undefined/[object Object]', () => {
+    const page = loadTemplate('stock-fund-flow.html');
+    page.fire('message', {
+      data: detailData([
+        {
+          title: '<img src=x>',
+          columns: ['日期', '净流入'],
+          rows: [{ cells: ['11-04', null], color: '' }],
+        },
+      ]),
+    });
+
+    const html = page.el('fundTables').innerHTML;
+    assert.ok(!html.includes('<img src=x>'), '标题必须转义');
+    assert.ok(html.includes('&lt;img'), '应输出转义后的标题');
+    assert.ok(!html.includes('undefined'), '不应渲染 undefined');
+    assert.ok(!html.includes('[object Object]'), '不应渲染 [object Object]');
+  });
+
+  it('顶栏股票下拉显示名称与代码，切换时发 select 消息', () => {
     const page = loadTemplate('stock-fund-flow.html');
     page.fire('message', {
       data: initData([
@@ -31,21 +109,18 @@ describe('资金动态模板 stock-fund-flow.html', () => {
       ]),
     });
 
-    const html = page.el('stockList').innerHTML;
-    assert.ok(html.includes('贵州茅台'), `列表应显示股票名称，实际：${html.slice(0, 200)}`);
-    assert.ok(html.includes('sh600519'), '列表应同时保留代码');
-  });
+    const html = page.el('stockSelect').innerHTML;
+    assert.ok(html.includes('贵州茅台'), `下拉应显示名称，实际：${html.slice(0, 200)}`);
+    assert.ok(html.includes('sh600519'), '下拉应保留代码');
 
-  it('名称缺失时只显示代码，不出现 undefined/[object Object]', () => {
-    const page = loadTemplate('stock-fund-flow.html');
-    page.fire('message', {
-      data: initData([{ code: 'sz000001', name: '', mainNet: null, tm: '', source: '' }]),
-    });
-
-    const html = page.el('stockList').innerHTML;
-    assert.ok(html.includes('sz000001'), '无名称时应回退显示代码');
-    assert.ok(!html.includes('undefined'), '不应渲染 undefined');
-    assert.ok(!html.includes('[object Object]'), '不应渲染 [object Object]');
+    page.posted.length = 0;
+    const sel = page.el('stockSelect');
+    sel.value = 'sh600519';
+    (sel.listeners.change || []).forEach((fn) => fn());
+    assert.ok(
+      page.posted.some((m) => m.command === 'select' && m.code === 'sh600519'),
+      '切换股票应通知宿主重拉详情'
+    );
   });
 
   it('量化分析按分组卡片渲染：组名标题 + 逐条消息', () => {
