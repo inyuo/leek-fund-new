@@ -100,6 +100,19 @@ function firstNumber(row: any, keys: string[]): number | null {
   return null;
 }
 
+/**
+ * 裸 6 位 A 股代码补交易所前缀（官网 get_lq 行 code 无前缀）。
+ * 下游资金动态面板（isAShareCode/下拉选项）只认 sh/sz+6 位，不补前缀
+ * 则 initialCode 匹配不到任何 option、详情直接判空（“没有选中的股票”）。
+ * 已带前缀与非 A 股代码原样透传（展示不丢，点入资金动态自会被过滤）。
+ */
+export function toAShareCode(code: any): string {
+  const raw = typeof code === 'string' ? code.trim() : '';
+  if (!/^\d{6}$/.test(raw)) return raw;
+  // 6/5/9 起归沪市（个股/基金/ETF），0/1/2/3 起归深市
+  return /^[659]/.test(raw) ? `sh${raw}` : `sz${raw}`;
+}
+
 function normalizeTags(list: any): string[] {
   if (!Array.isArray(list)) return [];
   const out: string[] = [];
@@ -144,7 +157,7 @@ export function normalizeLqGroups(payload: any): LqResult {
     const rows: LqRow[] = [];
     for (const item of group.list) {
       if (!item || typeof item !== 'object') continue;
-      const code = firstStr(item, ['code', 'Code', 'symbol']);
+      const code = toAShareCode(firstStr(item, ['code', 'Code', 'symbol']));
       if (!code) continue;
       rows.push({
         code,

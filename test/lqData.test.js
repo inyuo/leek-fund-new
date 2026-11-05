@@ -5,7 +5,7 @@
  * 这里用内存 store + 注入的 axios 假对象验证：元数据、载荷归一化、请求契约与降级。
  */
 const assert = require('assert');
-const { LQ_TAGS, LQ_DAYS, normalizeLqGroups, fetchLqList } = require('../out/shared/lqData');
+const { LQ_TAGS, LQ_DAYS, toAShareCode, normalizeLqGroups, fetchLqList } = require('../out/shared/lqData');
 
 const SESSION_KEY = 'leek-fund.ljgxSession';
 
@@ -75,8 +75,8 @@ describe('策略载荷归一化 normalizeLqGroups', () => {
     assert.strictEqual(result.groups.length, 1);
     assert.strictEqual(result.groups[0].title, '2026-11-04');
     assert.deepStrictEqual(result.groups[0].rows, [
-      { code: '300750', name: '宁德时代', percent: 5.95, note: '放量突破' },
-      { code: '300274', name: '阳光电源', percent: -1.2, note: '回踩均线' },
+      { code: 'sz300750', name: '宁德时代', percent: 5.95, note: '放量突破' },
+      { code: 'sz300274', name: '阳光电源', percent: -1.2, note: '回踩均线' },
     ]);
     assert.deepStrictEqual(result.hyTags, ['半导体', '新能源']);
     assert.deepStrictEqual(result.tsTags, [{ doc: '龙虎榜', url: '/pages/lhb/lhb' }]);
@@ -96,7 +96,7 @@ describe('策略载荷归一化 normalizeLqGroups', () => {
     assert.strictEqual(result.groups.length, 1, '只保留含有效行的分组');
     assert.strictEqual(result.groups[0].title, '无标题组');
     assert.deepStrictEqual(result.groups[0].rows, [
-      { code: '000001', name: '', percent: null, note: '' },
+      { code: 'sz000001', name: '', percent: null, note: '' },
     ]);
     assert.deepStrictEqual(result.hyTags, []);
     assert.deepStrictEqual(result.tsTags, [{ doc: '有效', url: '' }]);
@@ -110,6 +110,28 @@ describe('策略载荷归一化 normalizeLqGroups', () => {
         tsTags: [],
       });
     }
+  });
+
+  // 缺陷回归：官网 get_lq 行 code 是裸 6 位，资金动态面板只认 sh/sz+6位，
+  // 不补前缀则 initialCode 匹配不到下拉项、详情校验失败（表现为「没有选中的股票」）
+  it('裸 6 位 code 归一为 sh/sz 前缀（3/0 起→sz，6/5 起→sh）', () => {
+    assert.strictEqual(toAShareCode('300750'), 'sz300750');
+    assert.strictEqual(toAShareCode('000001'), 'sz000001');
+    assert.strictEqual(toAShareCode('600519'), 'sh600519');
+    assert.strictEqual(toAShareCode('510300'), 'sh510300');
+  });
+
+  it('已带前缀/非 A 股代码原样透传；归一化后 data-code 即可被资金动态识别', () => {
+    assert.strictEqual(toAShareCode('sh600519'), 'sh600519');
+    assert.strictEqual(toAShareCode('hk00700'), 'hk00700');
+    assert.strictEqual(toAShareCode('bad'), 'bad');
+    assert.strictEqual(toAShareCode(''), '');
+    assert.strictEqual(toAShareCode(undefined), '');
+
+    const result = normalizeLqGroups({
+      list: [{ title: 'g', list: [{ code: '600519', name: '贵州茅台' }] }],
+    });
+    assert.strictEqual(result.groups[0].rows[0].code, 'sh600519');
   });
 });
 
