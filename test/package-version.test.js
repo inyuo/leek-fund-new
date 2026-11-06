@@ -1,63 +1,94 @@
 /**
- * 打包版本号生成器测试：格式 / 补零 / 单调递增 / semver 合法。
- * 版本号必须随时间变化且恒增，否则 VS Code 会拒绝安装更高版本的产物。
+ * 打包命名测试：版本号回归正常 semver（1.x.y），时间戳只进 VSIX 文件名。
+ *
+ * 背景：旧方案把时间戳塞进 version（1.0.<14 位>），一旦之后用 standard-version
+ * 递增到 1.0.1，会比已发布版本更小，Marketplace / VS Code 都会拒绝安装。
  */
 const assert = require('assert');
-const { genVersion } = require('../scripts/package');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { genTimestamp, buildVsixName, cleanupOldVsix } = require('../scripts/package');
 
-describe('打包版本号 genVersion', () => {
-  it('格式为 1.0.YYYYMMDDHHmmss（含日期与时间，每次打包都会不同）', () => {
+describe('打包时间戳 genTimestamp', () => {
+  it('格式为 YYYYMMDDHHmmss（14 位，仅用于文件名）', () => {
     // Date 月份从 0 起：9 = 10 月
-    const v = genVersion(new Date(2026, 9, 19, 15, 42, 30));
-    assert.strictEqual(v, '1.0.20261019154230');
+    assert.strictEqual(genTimestamp(new Date(2026, 9, 19, 15, 42, 30)), '20261019154230');
   });
 
   it('月/日/时/分/秒不足两位时补零', () => {
-    const v = genVersion(new Date(2026, 0, 5, 9, 7, 3));
-    assert.strictEqual(v, '1.0.20260105090703');
+    assert.strictEqual(genTimestamp(new Date(2026, 0, 5, 9, 7, 3)), '20260105090703');
   });
 
-  it('同一秒内不同毫秒给出相同版本（避免无意义差异），不同秒必不同', () => {
-    const a = genVersion(new Date(2026, 9, 19, 10, 0, 0, 10));
-    const b = genVersion(new Date(2026, 9, 19, 10, 0, 0, 900));
-    const c = genVersion(new Date(2026, 9, 19, 10, 0, 1));
-    assert.strictEqual(a, b, '同一秒内版本应稳定');
-    assert.notStrictEqual(a, c, '跨秒必须产生新版本');
-  });
-
-  it('时间递增则版本递增（VS Code 要求新版本必须大于旧版本）', () => {
-    const seq = [
-      genVersion(new Date(2026, 9, 19, 10, 0, 0)),
-      genVersion(new Date(2026, 9, 19, 10, 0, 1)),
-      genVersion(new Date(2026, 9, 19, 23, 59, 59)),
-      genVersion(new Date(2026, 9, 20, 0, 0, 0)),
-      genVersion(new Date(2026, 11, 31, 23, 59, 59)),
-      genVersion(new Date(2027, 0, 1, 0, 0, 0)),
-    ];
-    for (let i = 1; i < seq.length; i++) {
-      assert.ok(seq[i - 1] < seq[i], `版本未递增：${seq[i - 1]} → ${seq[i]}`);
-    }
+  it('同一秒内相同、跨秒不同，且字符串序与时间序一致', () => {
+    const a = genTimestamp(new Date(2026, 9, 19, 10, 0, 0, 10));
+    const b = genTimestamp(new Date(2026, 9, 19, 10, 0, 0, 900));
+    const c = genTimestamp(new Date(2026, 9, 19, 10, 0, 1));
+    assert.strictEqual(a, b, '同一秒内应稳定');
+    assert.ok(a < c, `跨秒应递增：${a} → ${c}`);
   });
 
   it('跨小时位数变化时仍单调（09:59:59 < 10:00:00）', () => {
-    const a = genVersion(new Date(2026, 9, 19, 9, 59, 59));
-    const b = genVersion(new Date(2026, 9, 19, 10, 0, 0));
+    const a = genTimestamp(new Date(2026, 9, 19, 9, 59, 59));
+    const b = genTimestamp(new Date(2026, 9, 19, 10, 0, 0));
     assert.ok(a < b, `${a} 应 < ${b}`);
   });
+});
 
-  it('semver 合法：恰好三段，且 patch 无前导零', () => {
-    const v = genVersion(new Date(2026, 0, 1, 0, 0, 0));
-    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
-    assert.ok(m, `不是合法 semver：${v}`);
-    assert.strictEqual(m[3], String(Number(m[3])), `patch 有前导零：${v}`);
+describe('产物命名 buildVsixName', () => {
+  it('形如 <name>-<version>-<timestamp>.vsix，版本号在前', () => {
+    assert.strictEqual(
+      buildVsixName('investment-monitor', '1.0.1', '20261106092513'),
+      'investment-monitor-1.0.1-20261106092513.vsix'
+    );
   });
 
-  it('默认取当前时间，格式仍为 14 位时间戳', () => {
-    const v = genVersion();
-    assert.ok(/^1\.0\.\d{14}$/.test(v), `格式不符：${v}`);
+  it('同版本多次打包得到不同文件名，不会互相覆盖', () => {
+    const a = buildVsixName('x', '1.2.3', '20261106092513');
+    const b = buildVsixName('x', '1.2.3', '20261106092514');
+    assert.notStrictEqual(a, b);
+  });
+
+  it('清单版本必须是正常 semver，不能是旧方案的时间戳版本', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     assert.ok(
-      v >= `1.0.${new Date().getFullYear()}0101000000`,
-      `版本未落在当前年份：${v}`
+      /^\d+\.\d+\.\d+$/.test(pkg.version),
+      `package.json version 应为 1.x.y 形式，实际：${pkg.version}`
     );
+  });
+});
+
+describe('历史产物清理 cleanupOldVsix', () => {
+  function makeTempDir(files) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'leek-package-'));
+    files.forEach((f) => fs.writeFileSync(path.join(dir, f), 'PK'));
+    return dir;
+  }
+
+  it('只删本扩展的历史包，保留本次产物与无关文件', () => {
+    const keep = 'investment-monitor-1.0.1-20261106092513.vsix';
+    const dir = makeTempDir([
+      keep,
+      'investment-monitor-1.0.0-20261105194753.vsix',
+      'investment-monitor-1.0.0.vsix',
+      'other-extension-1.0.0.vsix',
+      'notes.txt',
+    ]);
+
+    const removed = cleanupOldVsix(dir, keep, 'investment-monitor');
+
+    assert.deepStrictEqual(removed.sort(), [
+      'investment-monitor-1.0.0-20261105194753.vsix',
+      'investment-monitor-1.0.0.vsix',
+    ]);
+    const left = fs.readdirSync(dir).sort();
+    assert.deepStrictEqual(left, [keep, 'notes.txt', 'other-extension-1.0.0.vsix'].sort());
+  });
+
+  it('目录里只有本次产物时不删任何东西', () => {
+    const keep = 'investment-monitor-1.0.1-20261106092513.vsix';
+    const dir = makeTempDir([keep]);
+    assert.deepStrictEqual(cleanupOldVsix(dir, keep, 'investment-monitor'), []);
+    assert.deepStrictEqual(fs.readdirSync(dir), [keep]);
   });
 });

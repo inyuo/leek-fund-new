@@ -7,7 +7,6 @@
 
 import Axios from 'axios';
 import { ExtensionContext } from 'vscode';
-import globalState from '../globalState';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { FundInfo, SortType, TreeItemType } from '../shared/typed';
 import { randHeader, sortData } from '../shared/utils';
@@ -27,10 +26,7 @@ export default class BinanceService extends LeekService {
     const res: any = await Axios.get(this.parisUrl, {
       headers: randHeader(),
     }).catch((err) => {
-      globalState.telemetry.sendEvent('error: binanceService', {
-        url: this.parisUrl,
-        error: err,
-      });
+      console.error('[binance] 获取交易对失败', this.parisUrl, err && err.message);
     });
     if (res && res.data) {
       return res.data.symbols?.map((i: any) => `${i.baseAsset}_${i.quoteAsset}`);
@@ -47,10 +43,7 @@ export default class BinanceService extends LeekService {
       const target = (res.data as any).find((data: any) => data.symbol === symbol.split('_').join(''));
       return ({ data: target, symbol });
     })).catch((err) => {
-      globalState.telemetry.sendEvent('error: binanceService', {
-        url: this.ticker24hrUrl,
-        error: err,
-      });
+      console.error('[binance] 获取 24h 行情失败', this.ticker24hrUrl, err && err.message);
       return Promise.reject(symbolsWithSplit.map(symbol => ({ data: null, symbol })));
     });
   }

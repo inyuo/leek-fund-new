@@ -49,9 +49,6 @@ async function setAmount(fundService: FundService) {
         // 保存排序方式
         LeekFundConfig.setConfig('leek-fund.fundAmountSort', message.sortType);
         return;
-      case 'telemetry':
-        globalState.telemetry.sendEvent('shareByPicture', { type: message.type });
-        return;
     }
   }, undefined);
 

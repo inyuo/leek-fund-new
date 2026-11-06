@@ -1,13 +1,10 @@
 import { ExtensionContext } from 'vscode';
 import { DEFAULT_LABEL_FORMAT } from './shared/constant';
-import { Telemetry } from './shared/telemetry';
 import { ForexData } from './shared/typed';
 
 const deviceId = Math.random().toString(16).substr(2) + Math.random().toString(32).substr(2);
 
 let context: ExtensionContext = undefined as unknown as ExtensionContext;
-
-let telemetry: Telemetry | any = null;
 
 let iconType = 'arrow';
 
@@ -46,7 +43,6 @@ let forexList: Array<ForexData> = []; // 外汇信息
 
 export default {
   context,
-  telemetry,
   iconType,
   deviceId,
   fundAmount,

@@ -623,10 +623,6 @@
 
           $('.text2image').click((evt) => {
             const type = evt.target.getAttribute('data-type') || 'all';
-            vscode.postMessage({
-              command: 'telemetry',
-              type,
-            });
 
             let selector = type === 'shouyi' ? '.footer' : '.main';
 

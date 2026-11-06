@@ -23,7 +23,6 @@ import { registerCommandPaletteEvent, registerQuant, registerViewEvent } from '.
 import { HolidayHelper } from './shared/holidayHelper';
 import { LeekFundConfig } from './shared/leekConfig';
 import Log from './shared/log';
-import { Telemetry } from './shared/telemetry';
 import { SortType } from './shared/typed';
 import { events, formatDate, isStockTime } from './shared/utils';
 import { createVscodeStorage } from './shared/ljgxData';
@@ -55,9 +54,6 @@ export async function activate(context: ExtensionContext) {
 
   // 资讯登录态切换：注册 globalState 存储引用（有量价掘金会话时资讯走 xxjwxc 官网源）
   initXxjNewsStorage(createVscodeStorage(context.globalState));
-
-  const telemetry = new Telemetry();
-  globalState.telemetry = telemetry;
 
   let intervalTimeConfig = LeekFundConfig.getConfig('leek-fund.interval', 5000);
   let intervalTime = intervalTimeConfig;
@@ -261,9 +257,6 @@ export async function activate(context: ExtensionContext) {
   }
   // start eastmoney data server
   createEastMoneyDataServer();
-
-  // Telemetry Event
-  telemetry.sendEvent('activate');
 }
 
 function setGlobalVariable() {

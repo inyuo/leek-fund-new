@@ -1,14 +1,19 @@
 /**
- * 打包编排：给每次产物一个带日期时间的版本号，避免每次都叫
- * investment-monitor-1.0.0.vsix 而无法区分是哪一次打的包。
+ * 打包编排：版本号走 package.json 的正常 semver（1.x.y，由 `yarn release`
+ * 即 standard-version 递增），时间戳**只体现在产物文件名**上。
  *
- * 版本格式：1.0.YYYYMMDDHHmmss   例：1.0.20261019154230
- *   - 保持 1.0 主线前缀，语义仍是同一版本线
- *   - 时间戳天然单调递增，满足 VS Code「新版本必须大于旧版本」的更新要求
- *   - patch 无前导零，semver 合法（VSIX 与扩展市场都要求 semver）
+ * 产物名：<name>-<version>-YYYYMMDDHHmmss.vsix
+ * 例：investment-monitor-1.0.1-20261106092513.vsix
  *
- * 打包前临时改写 package.json 的 version，打包结束（无论成败）用原始字节
- * 还原，使 git 工作区保持干净 —— 版本只体现在产物上，不污染仓库。
+ * 为什么不再把时间戳塞进 version：
+ *   - 旧方案生成 `1.0.<14 位时间戳>`，一旦之后跑 `yarn release` 得到 1.0.1，
+ *     就会比已发布过的 1.0.2026… **更小**，Marketplace / VS Code 都会拒绝安装
+ *   - 扩展清单里的 version 保持干净的 1.x.y，版本递增语义才成立
+ *
+ * 打包过程不修改 package.json，git 工作区天然保持干净。
+ *
+ * 历史遗留：旧方案可能留下 `1.0.<14 位时间戳>` 的残留版本号（上一次打包被强杀，
+ * 来不及还原）。检测到这种残留时按 git HEAD 的值纠正，避免把脏版本打进产物。
  *
  * 打包成功后清理根目录历史 VSIX，只保留本次产物；打包失败则保留旧包可用。
  *
@@ -23,42 +28,51 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const PKG_PATH = path.join(ROOT, 'package.json');
 
-/** 生成 1.0.YYYYMMDDHHmmss 形式的版本号 */
-function genVersion(now) {
+/** 旧方案残留的版本形态：1.0.20261019154230 */
+const LEGACY_VERSION_RE = /^\d+\.\d+\.\d{14}$/;
+
+/** 生成 YYYYMMDDHHmmss 时间戳（本地时间） */
+function genTimestamp(now) {
   const d = now || new Date();
   const p = (n) => String(n).padStart(2, '0');
   const date = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
   const time = `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-  return `1.0.${date}${time}`;
+  return `${date}${time}`;
+}
+
+/** 产物文件名：时间戳放在版本号之后，便于按版本聚合、按时间排序 */
+function buildVsixName(name, version, timestamp) {
+  return `${name}-${version}-${timestamp}.vsix`;
 }
 
 /**
- * 读取打包前的 package.json 基准内容。
- * 上次打包被强杀时 finally 可能来不及还原，version 会残留成 `1.0.<14 位时间戳>`；
- * 这种情况下只把 version 还原成 git 里的值，其余字段保持当前内容不动。
+ * 读取 package.json，顺带兜住旧方案的版本残留。
+ * @returns {{name: string, version: string}}
  */
-function readOriginalPackageBytes() {
+function readPackage() {
   const raw = fs.readFileSync(PKG_PATH, 'utf8');
-  let pkg;
-  try {
-    pkg = JSON.parse(raw);
-  } catch (e) {
-    return raw;
-  }
-  if (!/^\d+\.\d+\.\d{14}$/.test(String(pkg.version || ''))) return raw;
+  const pkg = JSON.parse(raw);
+  let version = String(pkg.version || '');
 
+  if (!LEGACY_VERSION_RE.test(version)) {
+    return { name: pkg.name, version };
+  }
+
+  // 残留版本号：以 git HEAD 为准纠正，纠不了就沿用，至少保证产物可用
+  console.warn(`[package] 检测到旧方案残留版本号 ${version}，按 git HEAD 纠正`);
   try {
-    const gitRaw = execSync('git show HEAD:package.json', { cwd: ROOT, encoding: 'utf8' });
-    const gitVersion = JSON.parse(gitRaw).version;
-    if (gitVersion && gitVersion !== pkg.version) {
-      console.log(`[package] 检测到上次打包残留的版本号 ${pkg.version}，还原为 ${gitVersion}`);
+    const gitVersion = JSON.parse(execSync('git show HEAD:package.json', { cwd: ROOT, encoding: 'utf8' })).version;
+    if (gitVersion && gitVersion !== version) {
       pkg.version = gitVersion;
-      return `${JSON.stringify(pkg, null, 2)}\n`;
+      fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
+      version = gitVersion;
+      console.log(`[package] 版本号已纠正为 ${version}`);
     }
   } catch (e) {
-    // 非 git 仓库或无 HEAD，忽略
+    console.warn('[package] 无法从 git 读取版本号，沿用当前值');
   }
-  return raw;
+
+  return { name: pkg.name, version };
 }
 
 /**
@@ -79,15 +93,17 @@ function isValidZip(file) {
 
 /**
  * 清理历史 VSIX，只保留 keepName。
- * - 只扫描传入目录，只匹配 investment-monitor-*.vsix，避免误删其它文件
+ * - 只扫描传入目录，只匹配 `<extensionName>-*.vsix`，避免误删其它文件
  * - 单个文件删除失败只告警：本次产物已经生成，不应让清理失败毁掉一次成功打包
+ * @param extensionName 清单里的 name 字段，决定哪些文件算本扩展的历史包
  * @returns {string[]} 实际删除的文件名
  */
-function cleanupOldVsix(rootDir, keepName) {
+function cleanupOldVsix(rootDir, keepName, extensionName) {
+  const prefix = `${extensionName}-`;
   const removed = [];
   const names = fs
     .readdirSync(rootDir)
-    .filter((name) => name !== keepName && /^investment-monitor-.*\.vsix$/.test(name));
+    .filter((name) => name !== keepName && name.startsWith(prefix) && name.endsWith('.vsix'));
 
   for (const name of names) {
     try {
@@ -102,58 +118,43 @@ function cleanupOldVsix(rootDir, keepName) {
 }
 
 function main() {
-  const originalBytes = readOriginalPackageBytes();
-  const pkg = JSON.parse(originalBytes);
-  const originalVersion = pkg.version;
-  const nextVersion = genVersion();
+  const { name, version } = readPackage();
+  const timestamp = genTimestamp();
+  const vsix = buildVsixName(name, version, timestamp);
 
-  pkg.version = nextVersion;
-  // 保持与原文件一致的两空格缩进 + 结尾换行
-  fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
-  console.log(`[package] version: ${originalVersion} → ${nextVersion}`);
+  console.log(`[package] version: ${version}（时间戳 ${timestamp} 只用于文件名）`);
+  console.log(`[package] 产物名: ${vsix}`);
 
-  let failed = false;
   try {
     const run = (cmd) => execSync(cmd, { cwd: ROOT, stdio: 'inherit', shell: true });
-
     run('node ./scripts/check-deps.js');
     run('node ./scripts/check-manifest-cli.js');
-    run('vsce package --yarn -o ./');
+    run(`vsce package --yarn -o ./${vsix}`);
   } catch (e) {
-    failed = true;
     console.error('[package] 打包失败：', e && e.message ? e.message : e);
-  } finally {
-    // 无论成功失败都还原，避免把一次性版本号提交进仓库
-    fs.writeFileSync(PKG_PATH, originalBytes);
-    console.log(`[package] package.json 已还原为 ${originalVersion}（git 保持干净）`);
-  }
-
-  if (failed) {
     process.exit(1);
   }
 
-  const vsix = `investment-monitor-${nextVersion}.vsix`;
   const full = path.join(ROOT, vsix);
-  if (fs.existsSync(full)) {
-    if (!isValidZip(full)) {
-      console.error(
-        `[package] 产物 ${vsix} 不是有效的 zip（打包可能被中断），保留历史包，请重新打包`
-      );
-      process.exit(1);
-    }
-    const kb = (fs.statSync(full).size / 1024).toFixed(0);
-    console.log(`[package] 产物：${vsix}（${kb} KB）`);
-
-    const removed = cleanupOldVsix(ROOT, vsix);
-    if (removed.length) {
-      console.log(`[package] 已清理 ${removed.length} 个历史包：${removed.join(', ')}`);
-    } else {
-      console.log('[package] 无历史包需要清理');
-    }
-  } else {
+  if (!fs.existsSync(full)) {
     // 没找到本次产物时绝不清理，避免删光旧包后无包可用
-    console.log(`[package] 期望产物：${vsix}（未在根目录找到，实际产物名可能不同）`);
-    console.log('[package] 未找到本次产物，保留历史包');
+    console.log(`[package] 未在根目录找到 ${vsix}，保留历史包`);
+    return;
+  }
+
+  if (!isValidZip(full)) {
+    console.error(`[package] 产物 ${vsix} 不是有效的 zip（打包可能被中断），保留历史包，请重新打包`);
+    process.exit(1);
+  }
+
+  const kb = (fs.statSync(full).size / 1024).toFixed(0);
+  console.log(`[package] 产物：${vsix}（${kb} KB）`);
+
+  const removed = cleanupOldVsix(ROOT, vsix, name);
+  if (removed.length) {
+    console.log(`[package] 已清理 ${removed.length} 个历史包：${removed.join(', ')}`);
+  } else {
+    console.log('[package] 无历史包需要清理');
   }
 }
 
@@ -161,4 +162,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { genVersion, cleanupOldVsix };
+module.exports = { genTimestamp, buildVsixName, cleanupOldVsix };

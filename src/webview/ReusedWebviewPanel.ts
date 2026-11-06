@@ -1,5 +1,4 @@
 import { window, ViewColumn, WebviewPanel, WebviewPanelOptions, WebviewOptions } from 'vscode';
-import globalState from '../globalState';
 
 module ReusedWebviewPanel {
   const webviewPanelsPool: Map<string, WebviewPanel> = new Map(); // webviewPanel池
@@ -31,12 +30,6 @@ module ReusedWebviewPanel {
     webviewPanelsPool.set(viewType, newPanel);
 
     console.log('webviewPanelsPool.size:', webviewPanelsPool.size);
-
-    try {
-      globalState.telemetry.sendEvent(viewType, { title });
-    } catch (err) {
-      console.error(err);
-    }
 
     return newPanel;
   }

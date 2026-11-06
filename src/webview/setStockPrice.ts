@@ -44,9 +44,6 @@ async function setStockPrice(stockService: StockService) {
           sortType: message.sortType,
         });
         return;
-      case 'telemetry':
-        globalState.telemetry.sendEvent('shareByPicture', { type: message.type });
-        return;
     }
   }, undefined);
 

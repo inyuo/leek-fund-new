@@ -1,5 +1,4 @@
 import WebSocket = require('ws');
-import globalState from '../../../globalState';
 import FlashNewsDaemon from '../FlashNewsDaemon';
 import NewsFlushServiceAbstractClass from '../NewsFlushServiceAbstractClass';
 
@@ -43,7 +42,6 @@ export default class Jin10FlushService extends NewsFlushServiceAbstractClass {
     });
 
     ws.addEventListener('error', (err: any) => {
-      globalState.telemetry.sendEvent('error:jin10Service', { error: err });
       console.log("🚀 ~ 金十快讯 ws 错误：Jin10FlushService ~ ws.addEventListener ~ err:", err);
     });
 

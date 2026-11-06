@@ -1,5 +1,4 @@
-import { Layout, Space, Divider, Button, Switch } from 'antd';
-import { postMessage } from '@/utils/common';
+import { Layout, Space, Switch } from 'antd';
 const { Footer } = Layout;
 
 export default function LFooter() {
@@ -15,36 +14,6 @@ export default function LFooter() {
             size="small"
           />
         </div>
-      </Space>
-      <Space
-        style={{ float: 'right' }}
-        align="end"
-        split={<Divider type="vertical" />}
-      >
-        {/*   <Button
-          onClick={() => {
-            postMessage('executeCommand', 'leek-fund-old.tucaoForum');
-          }}
-          type="link"
-        >
-          韭菜盒子社区
-        </Button> */}
-        <Button
-          onClick={() => {
-            postMessage('executeCommand', 'leek-fund-old.viewFundFlow');
-          }}
-          type="link"
-        >
-          北向资金流向
-        </Button>
-        <Button
-          onClick={() => {
-            postMessage('executeCommand', 'leek-fund-old.viewMainFundFlow');
-          }}
-          type="link"
-        >
-          主力资金流向
-        </Button>
       </Space>
     </Footer>
   );

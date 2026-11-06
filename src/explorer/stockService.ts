@@ -511,10 +511,6 @@ export default class StockService extends LeekService {
       if (globalState.showStockErrorInfo) {
         window.showErrorMessage(`fail: Stock error ` + url);
         globalState.showStockErrorInfo = false;
-        globalState.telemetry.sendEvent('error: stockService', {
-          url,
-          error: err,
-        });
       }
     }
 
@@ -617,10 +613,6 @@ export default class StockService extends LeekService {
       if (globalState.showStockErrorInfo) {
         window.showErrorMessage(`fail: HK Stock error ` + codes);
         globalState.showStockErrorInfo = false;
-        globalState.telemetry.sendEvent('error: stockService', {
-          codes,
-          error: err,
-        });
       }
     }
 
