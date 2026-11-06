@@ -541,18 +541,6 @@ export function getWebviewResourcesUrl(
   });
 }
 
-export function getResourcesImageSrc(
-  webview: vscode.Webview,
-  args: string[],
-  _extensionUri: vscode.Uri = globalState.context.extensionUri
-) {
-  return args.map((arg) => {
-    return webview.asWebviewUri(
-      vscode.Uri.parse([_extensionUri.toString(), 'resources', 'images', arg].join('/'))
-    );
-  });
-}
-
 /**
  * 限流并发：最多 `limit` 个任务同时执行，结果顺序与输入一致。
  *

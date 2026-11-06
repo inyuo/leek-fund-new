@@ -1,1 +1,0 @@
-﻿// http://fund.eastmoney.com/js/fundcode_search.js
